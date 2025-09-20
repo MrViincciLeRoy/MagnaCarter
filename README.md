@@ -1,5 +1,5 @@
 # magnaCarter Trading System
-## Multi-Asset Growth Network Analytics & Crypto Asset Risk Trading Expert Robot
+## Market-Adaptive Global Neural Architecture for Crypto Automation, Reinforcement Training, and Equity Returns
 
 A comprehensive algorithmic trading system that integrates with the Alpaca API for both backtesting and live trading of cryptocurrencies and stocks.
 
@@ -26,7 +26,7 @@ The trading strategy uses:
 1. Clone the repository:
 ```bash
 git clone <repository-url>
-cd alpaca-mega-crypto-bot
+cd magna-carter-trading-system
 ```
 
 2. Install dependencies:
@@ -49,10 +49,10 @@ export APCA_API_SECRET_KEY="your_secret_key_here"
 Run a backtest on historical data:
 
 ```python
-from alpaca_trading_system import AlpacaBacktester
+from magna_carter_trading_system import MagnaCarterBacktester
 
 # Initialize the backtester
-backtester = AlpacaBacktester(
+backtester = MagnaCarterBacktester(
     api_key="your_api_key",
     secret_key="your_secret_key",
     paper_trading=True,
@@ -75,10 +75,10 @@ stats, data = backtester.run_backtest(
 Start live paper trading:
 
 ```python
-from alpaca_trading_system import AlpacaBacktester, LiveTradingConfig
+from magna_carter_trading_system import MagnaCarterBacktester, LiveTradingConfig
 
 # Initialize system
-system = AlpacaBacktester(
+system = MagnaCarterBacktester(
     api_key="your_api_key",
     secret_key="your_secret_key",
     paper_trading=True  # ALWAYS start with paper trading!
@@ -139,13 +139,13 @@ Run demos from the command line:
 
 ```bash
 # Backtest demo
-python alpaca_trading_system.py --mode backtest --symbol BTC/USD
+python magna_carter_trading_system.py --mode backtest --symbol BTC/USD
 
 # Live trading demo
-python alpaca_trading_system.py --mode live --symbol BTC/USD --paper
+python magna_carter_trading_system.py --mode live --symbol BTC/USD --paper
 
 # Multi-symbol trading demo
-python alpaca_trading_system.py --mode multi --paper
+python magna_carter_trading_system.py --mode multi --paper
 ```
 
 ## Configuration
@@ -275,15 +275,6 @@ This software is for educational and research purposes only. Trading involves su
 
 The authors and contributors are not responsible for any financial losses incurred through the use of this software.
 
-## License
-
-
-
-## Support
-
-For questions and support:
-- Review the Alpaca API documentation
-- Join trading algorithm communities for general trading discussion
 
 ---
 
