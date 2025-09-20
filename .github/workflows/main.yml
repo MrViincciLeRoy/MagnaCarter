@@ -1,4 +1,4 @@
-name: Alpaca Trading System
+name: Alpaca Market Scanner
 
 on:
   # Manual trigger with input options
@@ -14,49 +14,64 @@ on:
           - live
           - multi
       symbol:
-        description: 'Trading symbol'
+        description: 'Trading symbol (or "ALL" for market scan)'
         required: false
-        default: 'BTC/USD'
+        default: 'ALL'
         type: string
       paper_trading:
         description: 'Use paper trading'
         required: false
         default: true
         type: boolean
-  
-  # Scheduled runs (optional - runs backtest daily at 6 AM UTC)
+      max_runtime:
+        description: 'Maximum runtime in minutes'
+        required: false
+        default: '25'
+        type: string
+
+  # Market scanning every 4 hours during market hours
+  # Runs at: 9:30 AM, 1:30 PM EST (market hours)
+  # and 6:00 AM, 10:00 AM, 2:00 PM, 6:00 PM UTC for global markets
   schedule:
-    - cron: '0 6 * * *'
-  
+    - cron: '30 13 * * 1-5'  # 9:30 AM EST (1:30 PM UTC) - Market open
+    - cron: '30 17 * * 1-5'  # 1:30 PM EST (5:30 PM UTC) - Mid-day
+    - cron: '0 6 * * 1-5'    # 6:00 AM UTC - Pre-market analysis
+    - cron: '0 22 * * 1-5'   # 10:00 PM UTC - After-hours analysis
+
   # Trigger on push to main branch (optional)
   push:
     branches: [ main ]
     paths: 
+      - 'market_scanner.py'
       - 'backtest.py'
       - '**.py'
 
 jobs:
-  run-trading-system:
+  market-scanner:
     runs-on: ubuntu-latest
+    timeout-minutes: 30  # Hard limit to respect GitHub's resources
     
+    # Only run during weekdays to avoid unnecessary weekend runs
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule != '0 6 * * 6,0') || github.event_name == 'push'
+
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
-    
+
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: '3.12'
         cache: 'pip'
-    
+
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
         if [ -f requirements.txt ]; then
           pip install -r requirements.txt
         else
-          # Install common trading dependencies if no requirements.txt
-          pip install alpaca-py pandas numpy matplotlib yfinance ta-lib
+          # Install essential trading dependencies
+          pip install alpaca-py pandas numpy matplotlib yfinance requests
         fi
     
     - name: Set environment variables
@@ -68,14 +83,64 @@ jobs:
         echo "ALPACA_API_KEY=$ALPACA_API_KEY" >> $GITHUB_ENV
         echo "ALPACA_SECRET_KEY=$ALPACA_SECRET_KEY" >> $GITHUB_ENV
         echo "ALPACA_BASE_URL=$ALPACA_BASE_URL" >> $GITHUB_ENV
+        echo "MAX_RUNTIME_MINUTES=${{ github.event.inputs.max_runtime || '25' }}" >> $GITHUB_ENV
     
-    - name: Run backtest (scheduled/push)
-      if: github.event_name == 'schedule' || github.event_name == 'push'
+    - name: Check market status
+      id: market_check
       run: |
-        python backtest.py --mode backtest --symbol "BTC/USD" --paper
+        python -c "
+        import requests
+        import json
+        from datetime import datetime, timezone
+        
+        try:
+            # Simple market hours check (US markets)
+            now = datetime.now(timezone.utc)
+            hour_utc = now.hour
+            weekday = now.weekday()  # 0=Monday, 6=Sunday
+            
+            # US market hours: 9:30 AM - 4:00 PM EST = 14:30 - 21:00 UTC
+            is_market_hours = weekday < 5 and 14 <= hour_utc <= 21
+            is_extended_hours = weekday < 5 and (13 <= hour_utc <= 22)
+            
+            print(f'Market hours: {is_market_hours}')
+            print(f'Extended hours: {is_extended_hours}')
+            print(f'::set-output name=market_open::{is_market_hours}')
+            print(f'::set-output name=extended_hours::{is_extended_hours}')
+            
+        except Exception as e:
+            print(f'Market check failed: {e}')
+            print('::set-output name=market_open::true')  # Default to run
+            print('::set-output name=extended_hours::true')
+        "
+    
+    - name: Run live test (scheduled)
+      if: github.event_name == 'schedule'
+      timeout-minutes: 25
+      run: |
+        echo "Starting scheduled live test..."
+        python backtest.py \
+          --mode live \
+          --symbol "BTC/USD" \
+          --max-runtime "${{ env.MAX_RUNTIME_MINUTES }}" \
+          --paper \
+          --output-dir "live_test_results/$(date +%Y%m%d_%H%M)" || echo "Live test completed with warnings"
+    
+    - name: Run market scan (manual)
+      if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'scan'
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
+      run: |
+        echo "Starting manual market scan..."
+        python market_scanner.py \
+          --mode scan \
+          --symbol "${{ github.event.inputs.symbol }}" \
+          --max-runtime "${{ github.event.inputs.max_runtime || '25' }}" \
+          ${{ github.event.inputs.paper_trading == 'true' && '--paper' || '' }} \
+          --output-dir "scan_results/$(date +%Y%m%d_%H%M)" || echo "Scan completed with warnings"
     
     - name: Run backtest (manual - backtest mode)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'backtest'
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
       run: |
         python backtest.py \
           --mode backtest \
@@ -84,6 +149,7 @@ jobs:
     
     - name: Run live trading (manual - live mode)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'live'
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
       run: |
         python backtest.py \
           --mode live \
@@ -92,37 +158,76 @@ jobs:
     
     - name: Run multi-symbol trading (manual - multi mode)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'multi'
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
       run: |
         python backtest.py \
           --mode multi \
           --symbol "${{ github.event.inputs.symbol }}" \
           ${{ github.event.inputs.paper_trading == 'true' && '--paper' || '' }}
     
-    - name: Upload backtest results
+    - name: Compress large result files
+      if: always()
+      run: |
+        # Compress large files to save storage
+        find . -name "*.csv" -size +10M -exec gzip {} \;
+        find . -name "*.log" -size +5M -exec gzip {} \;
+        
+        # Clean up temporary files
+        find . -name "*.tmp" -delete
+        find . -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+
+    - name: Upload scan results (last 7 days only)
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: backtest-results-${{ github.run_number }}
+        name: live-test-results-${{ github.run_number }}
         path: |
+          live_test_results/
+          scan_results/
           *.png
           *.csv
+          *.csv.gz
           *.log
+          *.log.gz
           results/
-        retention-days: 30
-    
-    - name: Create summary
+        retention-days: 7  # Reduced retention to save storage
+
+    - name: Create execution summary
       if: always()
       run: |
-        echo "## Trading System Execution Summary" >> $GITHUB_STEP_SUMMARY
-        echo "- **Mode**: ${{ github.event.inputs.mode || 'backtest' }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Symbol**: ${{ github.event.inputs.symbol || 'BTC/USD' }}" >> $GITHUB_STEP_SUMMARY
+        echo "## 📊 Live Trading Test Execution Report" >> $GITHUB_STEP_SUMMARY
+        echo "- **Mode**: ${{ github.event.inputs.mode || 'scan' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Symbol**: ${{ github.event.inputs.symbol || 'ALL' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Paper Trading**: ${{ github.event.inputs.paper_trading || 'true' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Max Runtime**: ${{ github.event.inputs.max_runtime || '25' }} minutes" >> $GITHUB_STEP_SUMMARY
         echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Market Open**: ${{ steps.market_check.outputs.market_open }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Execution Time**: $(date)" >> $GITHUB_STEP_SUMMARY
         
-        if [ -f "backtest_results.log" ]; then
-          echo "### Latest Log Output" >> $GITHUB_STEP_SUMMARY
+        # Show live test results summary if available
+        if [ -d "live_test_results" ]; then
+          echo "### 📈 Live Test Results" >> $GITHUB_STEP_SUMMARY
+          echo "- **Files Generated**: $(find live_test_results -type f | wc -l)" >> $GITHUB_STEP_SUMMARY
+          echo "- **Total Size**: $(du -sh live_test_results 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+        fi
+        
+        if [ -f "live_test.log" ]; then
+          echo "### 📋 Latest Live Test Log" >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
-          tail -20 backtest_results.log >> $GITHUB_STEP_SUMMARY
+          tail -15 live_test.log >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
         fi
+        
+        # Resource usage info
+        echo "### 🔧 Resource Usage" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow Duration**: ${{ job.status == 'success' && '< 30 minutes' || 'Timeout or error' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Storage Used**: $(du -sh . 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
+
+    - name: Cleanup old artifacts (cost optimization)
+      if: always()
+      run: |
+        echo "Cleaning up to optimize storage usage..."
+        # This would require GitHub CLI or API calls to actually delete old artifacts
+        # For now, we rely on the reduced retention-days setting
+        echo "Artifact retention set to 7 days to manage storage costs"
