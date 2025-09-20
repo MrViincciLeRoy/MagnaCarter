@@ -1,7 +1,8 @@
 # Core dependencies
 pandas>=2.0.0
 numpy>=1.24.0
-pandas-ta
+git+https://github.com/twopirllc/pandas-ta.git
+ 
 
 # Alpaca API
 alpaca-py>=0.21.0
