@@ -1,0 +1,22 @@
+# Core data manipulation and analysis
+pandas>=1.5.0
+numpy>=1.21.0
+
+# Technical analysis indicators
+pandas-ta
+
+# Alpaca trading API
+alpaca-py>=0.8.0
+
+# Backtesting framework
+backtesting>=0.3.3
+
+# Additional dependencies that may be required by the above packages
+requests>=2.25.1
+websockets>=10.0
+aiohttp>=3.8.0
+python-dateutil>=2.8.0
+pytz>=2021.3
+
+# Optional: For better logging and development
+colorlog>=6.6.0
