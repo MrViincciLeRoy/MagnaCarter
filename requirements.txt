@@ -3,7 +3,7 @@ pandas>=1.5.0
 numpy>=1.21.0
 
 # Technical analysis indicators
-pandas-ta
+pandas-ta==0.4.67b0
 
 # Alpaca trading API
 alpaca-py>=0.8.0
