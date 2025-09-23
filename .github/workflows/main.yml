@@ -122,10 +122,8 @@ jobs:
         python backtest.py \
           --mode live \
           --symbol "BTC/USD" \
-          --max-runtime "${{ env.MAX_RUNTIME_MINUTES }}" \
           --paper \
-          --output-dir "live_test_results/$(date +%Y%m%d_%H%M)" || echo "Live test completed with warnings"
-    
+              
     - name: Run market scan (manual)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'scan'
       timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
