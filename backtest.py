@@ -1291,7 +1291,7 @@ def demo_live_trading():
         max_position_size=0.5,      # Use 50% of portfolio
         max_daily_trades=5,         # Max 5 trades per day
         min_trade_interval=1800,    # 30 min between trades
-        check_interval=1800,        # Check every 30 min
+        check_interval=500,         # Check every 5 min
         risk_per_trade=0.02         # Risk 2% per trade
     )
 
