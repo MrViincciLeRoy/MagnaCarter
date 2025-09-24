@@ -1255,7 +1255,7 @@ def demo_backtest():
 
     backtester = AlpacaBacktester(
         api_key=os.getenv('ALPACA_API_KEY'),
-        secret_key=os.getenv('ALPACA_API_SECRET'),
+        secret_key=os.getenv('ALPACA_SECRET_KEY'),
         paper_trading=True,
         # Strategy parameters
         len_cbrc=30,
@@ -1279,7 +1279,7 @@ def demo_live_trading():
     # Initialize system
     system = AlpacaBacktester(
         api_key=os.getenv('ALPACA_API_KEY'),
-        secret_key=os.getenv('ALPACA_API_SECRET'),
+        secret_key=os.getenv('ALPACA_SECRET_KEY'),
         paper_trading=True,
         # Strategy parameters
         len_cbrc=25,
@@ -1311,7 +1311,7 @@ def demo_multi_symbol_trading():
 
     system = AlpacaBacktester(
         api_key=os.getenv('ALPACA_API_KEY'),
-        secret_key=os.getenv('ALPACA_API_SECRET'),
+        secret_key=os.getenv('ALPACA_SECRET_KEY'),
         paper_trading=True
     )
 
@@ -1373,7 +1373,7 @@ def main():
         logger.info("Testing API connection...")
         system = AlpacaBacktester(
             api_key=os.getenv('ALPACA_API_KEY'),
-            secret_key=os.getenv('ALPACA_API_SECRET'),
+            secret_key=os.getenv('ALPACA_SECRET_KEY'),
             paper_trading=True
         )
         
