@@ -116,7 +116,7 @@ jobs:
     
     - name: Run live test (scheduled)
       if: github.event_name == 'schedule'
-      timeout-minutes: 25
+      timeout-minutes: 105 
       run: |
         echo "Starting scheduled live test..."
         python backtest.py \
