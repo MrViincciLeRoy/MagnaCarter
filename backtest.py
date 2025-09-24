@@ -450,8 +450,8 @@ class AlpacaLiveTrader:
             config: Live trading configuration
             **strategy_params: Strategy parameters
         """
-        self.api_key = api_key or os.getenv('APCA_API_KEY_ID')
-        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY')
+        self.api_key = api_key or os.getenv('ALPACA_API_KEY')
+        self.secret_key = secret_key or os.getenv('ALPACA_API_SECRET')
         self.symbol = symbol
         self.paper_trading = paper_trading
         self.config = config or LiveTradingConfig()
@@ -1254,8 +1254,8 @@ def demo_backtest():
     logger.info("Running backtest demo...")
 
     backtester = AlpacaBacktester(
-        api_key=os.getenv('APCA_API_KEY_ID'),
-        secret_key=os.getenv('APCA_API_SECRET_KEY'),
+        api_key=os.getenv('ALPACA_API_KEY'),
+        secret_key=os.getenv('ALPACA_API_SECRET'),
         paper_trading=True,
         # Strategy parameters
         len_cbrc=30,
@@ -1278,8 +1278,8 @@ def demo_live_trading():
 
     # Initialize system
     system = AlpacaBacktester(
-        api_key=os.getenv('APCA_API_KEY_ID'),
-        secret_key=os.getenv('APCA_API_SECRET_KEY'),
+        api_key=os.getenv('ALPACA_API_KEY'),
+        secret_key=os.getenv('ALPACA_API_SECRET'),
         paper_trading=True,
         # Strategy parameters
         len_cbrc=25,
@@ -1310,8 +1310,8 @@ def demo_multi_symbol_trading():
     logger.info("Setting up multi-symbol trading demo...")
 
     system = AlpacaBacktester(
-        api_key=os.getenv('APCA_API_KEY_ID'),
-        secret_key=os.getenv('APCA_API_SECRET_KEY'),
+        api_key=os.getenv('ALPACA_API_KEY'),
+        secret_key=os.getenv('ALPACA_API_SECRET'),
         paper_trading=True
     )
 
@@ -1372,8 +1372,8 @@ def main():
         # Test API connection
         logger.info("Testing API connection...")
         system = AlpacaBacktester(
-            api_key=os.getenv('APCA_API_KEY_ID'),
-            secret_key=os.getenv('APCA_API_SECRET_KEY'),
+            api_key=os.getenv('ALPACA_API_KEY'),
+            secret_key=os.getenv('ALPACA_API_SECRET'),
             paper_trading=True
         )
         
