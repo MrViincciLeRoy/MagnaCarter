@@ -26,7 +26,7 @@ on:
       max_runtime:
         description: 'Maximum runtime in minutes'
         required: false
-        default: '45'
+        default: '55'
         type: string
 
   # Market scanning every 4 hours during market hours
@@ -49,7 +49,7 @@ on:
 jobs:
   market-scanner:
     runs-on: ubuntu-latest
-    timeout-minutes: 45  # Hard limit to respect GitHub's resources
+    timeout-minutes: 60 # Hard limit to respect GitHub's resources
     
     # Only run during weekdays to avoid unnecessary weekend runs
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule != '0 6 * * 6,0') || github.event_name == 'push'
