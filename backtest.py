@@ -32,6 +32,7 @@ class LiveTradingConfig:
     min_trade_interval: int = 3600      # Min seconds between trades (1 hour)
     check_interval: int = 1800          # Check signals every 30 minutes
     risk_per_trade: float = 0.02        # Risk 2% of portfolio per trade
+    max_runtime_minutes: int = None     # Max runtime in minutes (None = no limit)
 
 
 @dataclass
@@ -66,8 +67,8 @@ class AlpacaMegaCryptoBotFixed:
             **strategy_params: Strategy parameters to override defaults
         """
         # API Configuration
-        self.api_key = api_key or os.getenv('ALPACA_API_KEY')
-        self.secret_key = secret_key or os.getenv('ALPACA_SECRET_KEY')
+        self.api_key = api_key or os.getenv('APCA_API_KEY_ID')
+        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY')
         self.paper_trading = paper_trading
 
         # Initialize Alpaca clients
@@ -105,16 +106,16 @@ class AlpacaMegaCryptoBotFixed:
             self.crypto_data_client = None
             self.stock_data_client = None
 
-        # Strategy parameters
+        # Strategy parameters - optimized for more frequent signals
         default_params = {
-            'len_cbrc': 34,
-            'len_cbrc_high_low': 13,
-            'rst_len': 10,
-            'ema1_len': 13,
-            'ema2_len': 21,
-            'hma_base_length': 8,
-            'hma_length_scalar': 5,
-            'signal_period': '720min'
+            'len_cbrc': 20,
+            'len_cbrc_high_low': 8,
+            'rst_len': 7,
+            'ema1_len': 8,
+            'ema2_len': 13,
+            'hma_base_length': 6,
+            'hma_length_scalar': 3,
+            'signal_period': '240min'  # 4-hour periods for faster signals
         }
         self.params = {**default_params, **strategy_params}
 
@@ -369,28 +370,141 @@ class AlpacaMegaCryptoBotFixed:
         )
         strategy_df = strategy_df.ffill()
 
-        # Signal logic - trend changes on higher timeframe
+        # Enhanced signal logic with multiple conditions
         htf_close = strategy_df['Close_htf']
         htf_open = strategy_df['Open_htf']
 
+        # Current and previous candle states
         current_green = htf_close > htf_open
         current_red = htf_close < htf_open
         prev_green = htf_close.shift(1) > htf_open.shift(1)
         prev_red = htf_close.shift(1) < htf_open.shift(1)
 
-        # Generate signals on trend changes
-        long_cond = current_green & prev_red   # Green after red
-        short_cond = current_red & prev_green  # Red after green
+        # Price momentum conditions
+        price_rising = strategy_df['Close'] > strategy_df['Close'].shift(5)  # Price above 5 bars ago
+        price_falling = strategy_df['Close'] < strategy_df['Close'].shift(5)  # Price below 5 bars ago
+        
+        # EMA conditions for trend confirmation
+        ema_bullish = strategy_df['ema1'] > strategy_df['ema2']  # Fast EMA above slow EMA
+        ema_bearish = strategy_df['ema1'] < strategy_df['ema2']  # Fast EMA below slow EMA
+        
+        # HMA trend conditions
+        hma_rising = strategy_df['hma'] > strategy_df['hma'].shift(3)
+        hma_falling = strategy_df['hma'] < strategy_df['hma'].shift(3)
 
+        # Combined signal conditions (more sensitive)
+        long_cond = (
+            (current_green & prev_red) |  # Original: Green after red
+            (price_rising & ema_bullish & hma_rising & current_green) |  # Trend + momentum
+            (strategy_df['Close'] > strategy_df['cbrc_sma'] * 1.02)  # Price breakout above SMA
+        )
+        
+        short_cond = (
+            (current_red & prev_green) |  # Original: Red after green  
+            (price_falling & ema_bearish & hma_falling & current_red) |  # Trend + momentum
+            (strategy_df['Close'] < strategy_df['cbrc_sma'] * 0.98)  # Price breakdown below SMA
+        )
+
+        # Initialize signals
         strategy_df['signal'] = 0
         strategy_df.loc[long_cond, 'signal'] = 1
         strategy_df.loc[short_cond, 'signal'] = -1
+        
+        # Anti-whipsaw: only change signal if different from previous and held for at least 2 bars
+        prev_signal = strategy_df['signal'].shift(1).fillna(0)
+        signal_changed = strategy_df['signal'] != prev_signal
+        
+        # Only keep signals that are different from the previous signal
+        strategy_df.loc[~signal_changed, 'signal'] = prev_signal.loc[~signal_changed]
 
         logger.info("Trading signals generated")
+        
+        # Debug signal generation
+        signal_counts = strategy_df['signal'].value_counts().sort_index()
+        logger.info(f"Signal distribution: {dict(signal_counts)}")
+        
+        # Log recent signals for debugging
+        recent_signals = strategy_df['signal'].tail(10).tolist()
+        logger.info(f"Last 10 signals: {recent_signals}")
 
         return strategy_df
 
-    def analyze_signals(self, df: pd.DataFrame) -> Dict[str, Any]:
+    def debug_signal_generation(self, df: pd.DataFrame) -> Dict[str, Any]:
+        """Debug signal generation to understand why signals aren't being generated"""
+        try:
+            if len(df) == 0:
+                return {"error": "Empty dataframe"}
+            
+            # Get the strategy parameters being used
+            p = self.params
+            
+            # Calculate the same indicators for debugging
+            strategy_df = df.copy()
+            
+            # Create higher timeframe data
+            ohlc_dict = {'Open': 'first', 'High': 'max', 'Low': 'min', 'Close': 'last'}
+            df_higher_tf = strategy_df.resample(p['signal_period']).agg(ohlc_dict).dropna()
+            
+            # Get recent price action
+            recent_data = strategy_df.tail(20)
+            htf_recent = df_higher_tf.tail(10)
+            
+            debug_info = {
+                'total_bars': len(df),
+                'higher_timeframe_bars': len(df_higher_tf),
+                'signal_period': p['signal_period'],
+                'recent_prices': recent_data['Close'].tolist(),
+                'recent_htf_candles': [],
+                'price_trend': 'unknown',
+                'htf_trend': 'unknown'
+            }
+            
+            # Analyze higher timeframe candles
+            for idx, row in htf_recent.iterrows():
+                candle_type = 'green' if row['Close'] > row['Open'] else 'red' if row['Close'] < row['Open'] else 'doji'
+                debug_info['recent_htf_candles'].append({
+                    'timestamp': str(idx),
+                    'open': row['Open'],
+                    'close': row['Close'],
+                    'type': candle_type
+                })
+            
+            # Analyze price trend
+            if len(recent_data) >= 10:
+                price_change_5 = (recent_data['Close'].iloc[-1] - recent_data['Close'].iloc[-5]) / recent_data['Close'].iloc[-5]
+                price_change_10 = (recent_data['Close'].iloc[-1] - recent_data['Close'].iloc[-10]) / recent_data['Close'].iloc[-10]
+                
+                debug_info['price_change_5_bars'] = f"{price_change_5:.4f} ({price_change_5*100:.2f}%)"
+                debug_info['price_change_10_bars'] = f"{price_change_10:.4f} ({price_change_10*100:.2f}%)"
+                
+                if price_change_10 > 0.01:
+                    debug_info['price_trend'] = 'bullish'
+                elif price_change_10 < -0.01:
+                    debug_info['price_trend'] = 'bearish'
+                else:
+                    debug_info['price_trend'] = 'sideways'
+            
+            # Analyze HTF trend
+            if len(htf_recent) >= 3:
+                recent_candles = htf_recent.tail(3)
+                green_count = sum(1 for _, row in recent_candles.iterrows() if row['Close'] > row['Open'])
+                red_count = sum(1 for _, row in recent_candles.iterrows() if row['Close'] < row['Open'])
+                
+                debug_info['recent_htf_green'] = green_count
+                debug_info['recent_htf_red'] = red_count
+                
+                if green_count > red_count:
+                    debug_info['htf_trend'] = 'bullish'
+                elif red_count > green_count:
+                    debug_info['htf_trend'] = 'bearish'
+                else:
+                    debug_info['htf_trend'] = 'mixed'
+            
+            return debug_info
+            
+        except Exception as e:
+            logger.error(f"Error in debug_signal_generation: {e}")
+            return {"error": str(e)}
         """Analyze signal distribution and trading opportunities"""
         if 'signal' not in df.columns:
             return {}
@@ -450,8 +564,8 @@ class AlpacaLiveTrader:
             config: Live trading configuration
             **strategy_params: Strategy parameters
         """
-        self.api_key = api_key or os.getenv('ALPACA_API_KEY')
-        self.secret_key = secret_key or os.getenv('ALPACA_API_SECRET')
+        self.api_key = api_key or os.getenv('APCA_API_KEY_ID')
+        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY')
         self.symbol = symbol
         self.paper_trading = paper_trading
         self.config = config or LiveTradingConfig()
@@ -493,6 +607,7 @@ class AlpacaLiveTrader:
         self.last_reset_date = datetime.now().date()
         self.is_trading = False
         self.stop_trading_flag = False
+        self.start_time = None  # Track when trading started
 
         # Determine if crypto or stock
         self.is_crypto = "/" in symbol or any(crypto in symbol.upper()
@@ -671,11 +786,28 @@ class AlpacaLiveTrader:
             logger.error(f"Error type: {type(e).__name__}")
             return False
 
+    def should_continue_trading(self) -> bool:
+        """Check if trading should continue based on runtime limits and other conditions"""
+        # Check stop flag
+        if self.stop_trading_flag:
+            logger.info("Trading stopped by stop flag")
+            return False
+        
+        # Check max runtime if configured
+        if self.config.max_runtime_minutes and self.start_time:
+            elapsed_minutes = (datetime.now() - self.start_time).total_seconds() / 60
+            if elapsed_minutes >= self.config.max_runtime_minutes:
+                logger.info(f"Max runtime reached: {elapsed_minutes:.1f}/{self.config.max_runtime_minutes} minutes")
+                return False
+            else:
+                remaining_minutes = self.config.max_runtime_minutes - elapsed_minutes
+                logger.debug(f"Runtime remaining: {remaining_minutes:.1f} minutes")
+        
+        return True
     def should_trade(self, signal: int) -> bool:
         """Check if trading conditions are met"""
-        # Check if trading is stopped
-        if self.stop_trading_flag:
-            logger.debug("Trading stopped by flag")
+        # Check if trading should continue
+        if not self.should_continue_trading():
             return False
 
         # Reset daily trade count
@@ -799,6 +931,10 @@ class AlpacaLiveTrader:
                 logger.warning(f"Insufficient data for signal generation: {len(data)} bars")
                 return None
 
+            # Debug signal generation
+            debug_info = self.strategy_bot.debug_signal_generation(data)
+            logger.info(f"Signal debug info: {debug_info}")
+
             # Calculate indicators and signals
             strategy_data = self.strategy_bot.calculate_indicators(data)
 
@@ -850,11 +986,18 @@ class AlpacaLiveTrader:
             return False
 
     def start_live_trading(self):
-        """Start live trading loop"""
+        """Start live trading loop with runtime management"""
+        self.start_time = datetime.now()
+        
         logger.info("Starting live trading...")
         logger.info(f"Symbol: {self.symbol}")
         logger.info(f"Paper trading: {self.paper_trading}")
         logger.info(f"Check interval: {self.config.check_interval}s")
+        
+        if self.config.max_runtime_minutes:
+            logger.info(f"Max runtime: {self.config.max_runtime_minutes} minutes")
+            end_time = self.start_time + timedelta(minutes=self.config.max_runtime_minutes)
+            logger.info(f"Will stop at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
 
         # Display account info
         account_info = self.get_account_info()
@@ -867,14 +1010,22 @@ class AlpacaLiveTrader:
         self.stop_trading_flag = False
 
         try:
-            while not self.stop_trading_flag:
+            while self.should_continue_trading():
                 self.run_single_check()
 
-                # Sleep with interrupt checking
+                # Sleep with interrupt checking and runtime monitoring
+                sleep_start = datetime.now()
                 for i in range(self.config.check_interval):
-                    if self.stop_trading_flag:
+                    if not self.should_continue_trading():
                         break
                     time.sleep(1)
+                    
+                    # Log periodic runtime updates
+                    if self.config.max_runtime_minutes and i % 300 == 0:  # Every 5 minutes
+                        elapsed = (datetime.now() - self.start_time).total_seconds() / 60
+                        remaining = self.config.max_runtime_minutes - elapsed
+                        if remaining > 0:
+                            logger.debug(f"Runtime: {elapsed:.1f}/{self.config.max_runtime_minutes}min ({remaining:.1f}min remaining)")
 
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")
@@ -883,7 +1034,8 @@ class AlpacaLiveTrader:
             logger.error(f"Error type: {type(e).__name__}")
         finally:
             self.is_trading = False
-            logger.info("Live trading stopped")
+            elapsed_minutes = (datetime.now() - self.start_time).total_seconds() / 60
+            logger.info(f"Live trading stopped after {elapsed_minutes:.1f} minutes")
 
     def stop_live_trading(self):
         """Stop live trading"""
@@ -1122,10 +1274,11 @@ class AlpacaBacktester:
         start_date: str = "2024-01-01",
         end_date: str = None,
         initial_cash: float = None,
-        commission: float = 0.002
+        commission: float = 0.002,
+        max_runtime_minutes: int = None
     ) -> Tuple[Any, pd.DataFrame]:
         """
-        Run complete backtest
+        Run complete backtest with runtime management
 
         Args:
             symbol: Trading symbol
@@ -1133,15 +1286,34 @@ class AlpacaBacktester:
             end_date: End date (YYYY-MM-DD)
             initial_cash: Starting capital
             commission: Trading commission rate
+            max_runtime_minutes: Maximum runtime in minutes (None = no limit)
 
         Returns:
             Tuple of (backtest_stats, strategy_data)
         """
+        backtest_start_time = datetime.now()
+        
         logger.info(f"Starting backtest for {symbol}")
         logger.info(f"Period: {start_date} to {end_date or 'today'}")
+        
+        if max_runtime_minutes:
+            logger.info(f"Max runtime: {max_runtime_minutes} minutes")
+            end_time = backtest_start_time + timedelta(minutes=max_runtime_minutes)
+            logger.info(f"Will timeout at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
+
+        def check_runtime():
+            if max_runtime_minutes:
+                elapsed_minutes = (datetime.now() - backtest_start_time).total_seconds() / 60
+                if elapsed_minutes >= max_runtime_minutes:
+                    logger.warning(f"Backtest timeout reached: {elapsed_minutes:.1f}/{max_runtime_minutes} minutes")
+                    return False
+            return True
 
         try:
             # --- 1. Get Data ---
+            if not check_runtime():
+                return None, pd.DataFrame()
+                
             if "/" in symbol or "USD" in symbol.upper():
                 data = self.strategy_bot.get_crypto_data(symbol, start_date, end_date)
             else:
@@ -1154,9 +1326,15 @@ class AlpacaBacktester:
             logger.info(f"Data loaded: {len(data)} bars")
 
             # --- 2. Calculate Indicators ---
+            if not check_runtime():
+                return None, pd.DataFrame()
+                
             strategy_data = self.strategy_bot.calculate_indicators(data)
 
             # --- 3. Analyze Signals ---
+            if not check_runtime():
+                return None, pd.DataFrame()
+                
             signal_analysis = self.strategy_bot.analyze_signals(strategy_data)
 
             if signal_analysis:
@@ -1174,6 +1352,9 @@ class AlpacaBacktester:
                     return None, strategy_data
 
             # --- 4. Setup Backtest ---
+            if not check_runtime():
+                return None, pd.DataFrame()
+                
             if initial_cash is None:
                 max_price = strategy_data['Close'].max()
                 if "/" in symbol or "BTC" in symbol or "ETH" in symbol:
@@ -1185,6 +1366,9 @@ class AlpacaBacktester:
             logger.info(f"Max {symbol} price: ${strategy_data['Close'].max():,.2f}")
 
             # --- 5. Run Backtest ---
+            if not check_runtime():
+                return None, pd.DataFrame()
+                
             bt = Backtest(
                 strategy_data,
                 AlpacaStrategyWrapper,
@@ -1196,12 +1380,19 @@ class AlpacaBacktester:
             stats = bt.run()
 
             # --- 6. Performance Analysis ---
+            if not check_runtime():
+                return stats, strategy_data  # Return partial results
+                
             self._print_results(stats, strategy_data, symbol)
 
             # --- 7. Generate Plot ---
-            logger.info("Generating performance plot...")
-            bt.plot()
+            if check_runtime():
+                logger.info("Generating performance plot...")
+                bt.plot()
 
+            elapsed_minutes = (datetime.now() - backtest_start_time).total_seconds() / 60
+            logger.info(f"Backtest completed in {elapsed_minutes:.1f} minutes")
+            
             return stats, strategy_data
 
         except Exception as e:
@@ -1249,9 +1440,22 @@ class AlpacaBacktester:
 # ==============================================================================
 # EXAMPLE USAGE AND DEMOS
 # ==============================================================================
+def get_runtime_from_env() -> Optional[int]:
+    """Get max runtime from environment variable"""
+    try:
+        max_runtime = os.getenv('MAX_RUNTIME_MINUTES', 40)
+        if max_runtime:
+            return int(max_runtime)
+    except (ValueError, TypeError):
+        logger.warning(f"Invalid MAX_RUNTIME_MINUTES value: {max_runtime}")
+    return None
+
+
 def demo_backtest():
-    """Demo: Run a backtest"""
+    """Demo: Run a backtest with runtime management"""
     logger.info("Running backtest demo...")
+    
+    max_runtime = get_runtime_from_env()
 
     backtester = AlpacaBacktester(
         api_key=os.getenv('ALPACA_API_KEY'),
@@ -1259,22 +1463,25 @@ def demo_backtest():
         paper_trading=True,
         # Strategy parameters
         len_cbrc=30,
-        signal_period='480min'
+        signal_period='360min'
     )
 
     stats, data = backtester.run_backtest(
         symbol="BTC/USD",
         start_date="2024-01-01",
         end_date="2024-06-30",
-        initial_cash=100000
+        initial_cash=100000,
+        max_runtime_minutes=max_runtime
     )
 
     return stats, data
 
 
 def demo_live_trading():
-    """Demo: Live trading setup"""
+    """Demo: Live trading setup with runtime management"""
     logger.info("Setting up live trading demo...")
+    
+    max_runtime = get_runtime_from_env()
 
     # Initialize system
     system = AlpacaBacktester(
@@ -1286,13 +1493,14 @@ def demo_live_trading():
         signal_period='360min'
     )
 
-    # Configure live trading
+    # Configure live trading with more aggressive settings for signal generation
     config = LiveTradingConfig(
         max_position_size=0.5,      # Use 50% of portfolio
         max_daily_trades=5,         # Max 5 trades per day
         min_trade_interval=1800,    # 30 min between trades
-        check_interval=500,         # Check every 5 min
-        risk_per_trade=0.02         # Risk 2% per trade
+        check_interval=300,         # Check every 15 min (more frequent)
+        risk_per_trade=0.02,        # Risk 2% per trade
+        max_runtime_minutes=max_runtime  # Use environment variable
     )
 
     # Start live trading
@@ -1306,12 +1514,14 @@ def demo_live_trading():
 
 
 def demo_multi_symbol_trading():
-    """Demo: Multiple symbol live trading"""
+    """Demo: Multiple symbol live trading with runtime management"""
     logger.info("Setting up multi-symbol trading demo...")
+    
+    max_runtime = get_runtime_from_env()
 
     system = AlpacaBacktester(
-        api_key=os.getenv('ALPACA_API_KEY'),
-        secret_key=os.getenv('ALPACA_SECRET_KEY'),
+        api_key=os.getenv('APCA_API_KEY_ID'),
+        secret_key=os.getenv('APCA_API_SECRET_KEY'),
         paper_trading=True
     )
 
@@ -1319,13 +1529,15 @@ def demo_multi_symbol_trading():
     crypto_config = LiveTradingConfig(
         max_position_size=0.4,
         max_daily_trades=8,
-        check_interval=1800
+        check_interval=1800,
+        max_runtime_minutes=max_runtime
     )
 
     stock_config = LiveTradingConfig(
         max_position_size=0.6,
         max_daily_trades=5,
-        check_interval=3600
+        check_interval=3600,
+        max_runtime_minutes=max_runtime
     )
 
     # Start multiple traders
@@ -1342,14 +1554,23 @@ def demo_multi_symbol_trading():
             background=True  # Run all in background
         )
 
-    # Monitor all traders
+    # Monitor all traders with runtime awareness
+    monitor_start = datetime.now()
     try:
         while True:
+            # Check if we should stop monitoring due to runtime limit
+            if max_runtime:
+                elapsed_minutes = (datetime.now() - monitor_start).total_seconds() / 60
+                if elapsed_minutes >= max_runtime:
+                    logger.info(f"Monitor timeout reached: {elapsed_minutes:.1f}/{max_runtime} minutes")
+                    break
+                    
             summary = system.get_live_trading_summary()
             logger.info(f"Active traders: {summary['active_traders']}")
             time.sleep(60)  # Check every minute
     except KeyboardInterrupt:
         logger.info("Stopping all traders...")
+    finally:
         system.stop_live_trading()
 
     return system
@@ -1372,8 +1593,8 @@ def main():
         # Test API connection
         logger.info("Testing API connection...")
         system = AlpacaBacktester(
-            api_key=os.getenv('ALPACA_API_KEY'),
-            secret_key=os.getenv('ALPACA_SECRET_KEY'),
+            api_key=os.getenv('APCA_API_KEY_ID'),
+            secret_key=os.getenv('APCA_API_SECRET_KEY'),
             paper_trading=True
         )
         
