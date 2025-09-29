@@ -147,14 +147,14 @@ class AlpacaMegaCryptoBotFixed:
 
         try:
             if end_date is None:
-                end_date = datetime.now().strftime("%Y-%m-%d")
+                end_date = datetime.now().strftime("%Y-%m-%d-H%-M%")
 
             logger.info(f"Fetching {symbol} data from {start_date} to {end_date}")
 
             request = CryptoBarsRequest(
                 symbol_or_symbols=[symbol],
                 timeframe=timeframe,
-                start=datetime.strptime(start_date, "%Y-%m-%d"),
+                #start=datetime.strptime(start_date, "%Y-%m-%d"),
                 end=datetime.strptime(end_date, "%Y-%m-%d")
             )
 
