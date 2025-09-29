@@ -83,7 +83,7 @@ jobs:
         echo "ALPACA_API_KEY=$ALPACA_API_KEY" >> $GITHUB_ENV
         echo "ALPACA_SECRET_KEY=$ALPACA_SECRET_KEY" >> $GITHUB_ENV
         echo "ALPACA_BASE_URL=$ALPACA_BASE_URL" >> $GITHUB_ENV
-        echo "MAX_RUNTIME_MINUTES=${{ github.event.inputs.max_runtime || '25' }}" >> $GITHUB_ENV
+        echo "MAX_RUNTIME_MINUTES=${{ github.event.inputs.max_runtime || '45' }}" >> $GITHUB_ENV
     
     - name: Check market status
       id: market_check
@@ -126,7 +126,7 @@ jobs:
               
     - name: Run market scan (manual)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'scan'
-      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
         echo "Starting manual market scan..."
         python market_scanner.py \
@@ -137,7 +137,7 @@ jobs:
     
     - name: Run backtest (manual - backtest mode)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'backtest'
-      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
         python backtest.py \
           --mode backtest \
@@ -146,7 +146,7 @@ jobs:
     
     - name: Run live trading (manual - live mode)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'live'
-      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
         python backtest.py \
           --mode live \
@@ -155,7 +155,7 @@ jobs:
     
     - name: Run multi-symbol trading (manual - multi mode)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'multi'
-      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '25') }}
+      timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
         python backtest.py \
           --mode multi \
@@ -196,7 +196,7 @@ jobs:
         echo "- **Mode**: ${{ github.event.inputs.mode || 'scan' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Symbol**: ${{ github.event.inputs.symbol || 'ALL' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Paper Trading**: ${{ github.event.inputs.paper_trading || 'true' }}" >> $GITHUB_STEP_SUMMARY
-        echo "- **Max Runtime**: ${{ github.event.inputs.max_runtime || '25' }} minutes" >> $GITHUB_STEP_SUMMARY
+        echo "- **Max Runtime**: ${{ github.event.inputs.max_runtime || '45' }} minutes" >> $GITHUB_STEP_SUMMARY
         echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Market Open**: ${{ steps.market_check.outputs.market_open }}" >> $GITHUB_STEP_SUMMARY
@@ -218,7 +218,7 @@ jobs:
         
         # Resource usage info
         echo "### 🔧 Resource Usage" >> $GITHUB_STEP_SUMMARY
-        echo "- **Workflow Duration**: ${{ job.status == 'success' && '< 30 minutes' || 'Timeout or error' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **Workflow Duration**: ${{ job.status == 'success' && '< 60 minutes' || 'Timeout or error' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Storage Used**: $(du -sh . 2>/dev/null | cut -f1 || echo 'N/A')" >> $GITHUB_STEP_SUMMARY
 
     - name: Cleanup old artifacts (cost optimization)
