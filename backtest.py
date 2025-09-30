@@ -148,7 +148,7 @@ class AlpacaMegaCryptoBotFixed:
         try:
             if end_date is None:
                 end_date = datetime.now().strftime("%Y-%m-%d-%H-%M")
-            _start_datetime = end_datetime - timedelta(days=30)
+            _start_datetime = end_date - timedelta(days=30)
             _start_date = _start_datetime.strftime("%Y-%m-%d")
 
 
