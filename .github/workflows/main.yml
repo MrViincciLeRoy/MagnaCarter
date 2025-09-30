@@ -33,10 +33,7 @@ on:
   # Runs at: 9:30 AM, 1:30 PM EST (market hours)
   # and 6:00 AM, 10:00 AM, 2:00 PM, 6:00 PM UTC for global markets
   schedule:
-    - cron: '30 13 * * 1-5'  # 9:30 AM EST (1:30 PM UTC) - Market open
-    - cron: '30 17 * * 1-5'  # 1:30 PM EST (5:30 PM UTC) - Mid-day
-    - cron: '0 6 * * 1-5'    # 6:00 AM UTC - Pre-market analysis
-    - cron: '0 22 * * 1-5'   # 10:00 PM UTC - After-hours analysis
+    - cron: '0 */4 * * 1-5' 
 
   # Trigger on push to main branch (optional)
   push:
