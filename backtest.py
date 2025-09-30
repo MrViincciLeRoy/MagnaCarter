@@ -157,7 +157,7 @@ class AlpacaMegaCryptoBotFixed:
             request = CryptoBarsRequest(
                 symbol_or_symbols=[symbol],
                 timeframe=timeframe,
-                start=datetime.strptime(_start_date, "%Y-%m-%d"),
+                start=datetime.strptime(end_date - timedelta(days=30), "%Y-%m-%d"),
                 end=datetime.strptime(end_date, "%Y-%m-%d")
             )
 
