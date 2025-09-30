@@ -148,8 +148,8 @@ class AlpacaMegaCryptoBotFixed:
         try:
             if end_date is None:
                 end_date = datetime.now().strftime("%Y-%m-%d-%H-%M")
-                _start_datetime = end_datetime - timedelta(days=30)
-                _start_date = _start_datetime.strftime("%Y-%m-%d")
+            _start_datetime = end_datetime - timedelta(days=30)
+            _start_date = _start_datetime.strftime("%Y-%m-%d")
 
 
             logger.info(f"Fetching {symbol} data from {start_date} to {end_date}")
@@ -157,7 +157,7 @@ class AlpacaMegaCryptoBotFixed:
             request = CryptoBarsRequest(
                 symbol_or_symbols=[symbol],
                 timeframe=timeframe,
-                start=datetime.strptime(end_date - timedelta(days=30), "%Y-%m-%d"),
+                start=datetime.strptime(start_date, "%Y-%m-%d"),
                 end=datetime.strptime(end_date, "%Y-%m-%d")
             )
 
