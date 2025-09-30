@@ -125,7 +125,7 @@ class AlpacaMegaCryptoBotFixed:
     def get_crypto_data(
         self,
         symbol: str = "BTC/USD",
-        start_date: str = "2024-01-01",
+        start_date: str = "2025-09-01",
         end_date: str = None,
         timeframe: TimeFrame = TimeFrame.Hour
     ) -> pd.DataFrame:
@@ -154,7 +154,7 @@ class AlpacaMegaCryptoBotFixed:
             request = CryptoBarsRequest(
                 symbol_or_symbols=[symbol],
                 timeframe=timeframe,
-                #start=datetime.strptime(start_date, "%Y-%m-%d"),
+                start=datetime.strptime(start_date, "%Y-%m-%d"),
                 end=datetime.strptime(end_date, "%Y-%m-%d")
             )
 
