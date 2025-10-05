@@ -1413,7 +1413,7 @@ class AlpacaLiveTrader:
             # Execute trade if signal changed
             if signal.signal != self.last_signal:
                 logger.info(f"Signal changed from {self.last_signal} to {signal.signal}")
-                success = self._execute_trade(signal)
+                success = self.execute_trade(signal)
                 logger.info(f"Trade execution: {'SUCCESS' if success else 'FAILED'}")
                 return success
             else:
