@@ -8,7 +8,15 @@ import threading
 from datetime import datetime, timedelta
 from typing import Optional, Dict, Any, Tuple
 from dataclasses import dataclass
-
+from alpaca.trading.requests import (
+    MarketOrderRequest, 
+    LimitOrderRequest,
+    StopOrderRequest,
+    GetOrdersRequest,
+    TakeProfitRequest,
+    StopLossRequest
+)
+from alpaca.trading.enums import OrderSide, TimeInForce, OrderType, OrderClass
 from alpaca.trading.client import TradingClient
 from alpaca.trading.requests import MarketOrderRequest, LimitOrderRequest
 from alpaca.trading.enums import OrderSide, TimeInForce, OrderType
