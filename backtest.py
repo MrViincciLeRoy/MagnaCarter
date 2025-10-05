@@ -1224,7 +1224,7 @@ class AlpacaLiveTrader:
         logger.info(f"Trading conditions met. Signal: {signal}, Last: {self.last_signal}")
         return True
 
-    def _execute_trade(self, signal: TradeSignal) -> bool:
+    def execute_trade(self, signal: TradeSignal) -> bool:
         """
         Execute trade with bracket order (stop loss + take profit)
         This replaces or supplements the original execute_trade method
@@ -1247,7 +1247,7 @@ class AlpacaLiveTrader:
                 # Close any existing short position first
                 if current_position and current_position['side'] == 'short':
                     logger.info("Closing short position before going long")
-                    self.cancel_all_orders_for_symbol()  # Cancel pending orders
+                    #self.cancel_all_orders_for_symbol()  # Cancel pending orders
                     self.close_position()
                     time.sleep(2)
 
@@ -1270,7 +1270,7 @@ class AlpacaLiveTrader:
 
                 if current_position and current_position['side'] == 'long':
                     # Cancel any pending orders and close position
-                    self.cancel_all_orders_for_symbol()
+                    #self.cancel_all_orders_for_symbol()
                     success = self.close_position()
                     if success:
                         logger.info(f"LONG position closed at ${signal.price:.2f}")
@@ -1285,7 +1285,7 @@ class AlpacaLiveTrader:
             logger.error(f"Error executing trade with bracket: {e}")
             return False
 
-    def execute_trade(self, signal: TradeSignal) -> bool:
+    def _execute_trade(self, signal: TradeSignal) -> bool:
         """Execute trade based on signal with comprehensive error handling"""
         try:
             logger.info(f"Executing trade - Signal: {signal.signal}, Price: ${signal.price}, Symbol: {signal.symbol}")
