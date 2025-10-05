@@ -586,11 +586,11 @@ class AlpacaLiveTrader:
                 secret_key=self.secret_key,
                 paper=paper_trading
             )
-            
+
             # Test connection
             account = self.trading_client.get_account()
             logger.info(f"Connected to trading client: {account.status}")
-            
+
         except Exception as e:
             logger.error(f"Failed to initialize trading client: {e}")
             logger.error(f"Error type: {type(e).__name__}")
@@ -660,11 +660,383 @@ class AlpacaLiveTrader:
             logger.error(f"Error type: {type(e).__name__}")
             return None
 
+    def place_bracket_order(
+        self,
+        side: OrderSide,
+        quantity: float,
+        take_profit_pct: float = 0.05,  # 5% take profit
+        stop_loss_pct: float = 0.02,  # 2% stop loss
+    ) -> bool:
+        """
+        Place a bracket order (entry with linked stop loss and take profit)
+
+        Args:
+            side: OrderSide.BUY or OrderSide.SELL
+            quantity: Quantity to trade
+            take_profit_pct: Percentage gain for take profit
+            stop_loss_pct: Percentage loss for stop loss
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            if quantity <= 0:
+                logger.error(f"Invalid quantity for bracket order: {quantity}")
+                return False
+
+            current_price = self._get_current_price()
+            if current_price is None:
+                logger.error("Cannot place bracket order without current price")
+                return False
+
+            # Calculate TP and SL prices
+            if side == OrderSide.BUY:
+                take_profit_price = current_price * (1 + take_profit_pct)
+                stop_loss_price = current_price * (1 - stop_loss_pct)
+            elif side == OrderSide.SELL:
+                take_profit_price = current_price * (1 - take_profit_pct)
+                stop_loss_price = current_price * (1 + stop_loss_pct)
+            else:
+                logger.error(f"Unsupported side for bracket order: {side}")
+                return False
+
+            logger.info(f"Placing bracket order: {side.value} {quantity} {self.symbol}")
+            logger.info(f"Entry: ${current_price:.2f}, TP: ${take_profit_price:.2f}, SL: ${stop_loss_price:.2f}")
+
+            # Create bracket order
+            bracket_order_data = MarketOrderRequest(
+                symbol=self.symbol,
+                qty=quantity,
+                side=side,
+                time_in_force=TimeInForce.GTC,
+                order_class=OrderClass.BRACKET,
+                take_profit=TakeProfitRequest(
+                    limit_price=round(take_profit_price, 2)
+                ),
+                stop_loss=StopLossRequest(
+                    stop_price=round(stop_loss_price, 2)
+                )
+            )
+
+            order = self.trading_client.submit_order(order_data=bracket_order_data)
+
+            logger.info(f"Bracket order submitted: ID {order.id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error placing bracket order: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            return False
+
+    def add_stop_loss_to_position(
+        self,
+        stop_price: float,
+        quantity: Optional[float] = None
+    ) -> bool:
+        """
+        Add a stop loss order to an existing open position
+
+        Args:
+            stop_price: Stop loss price
+            quantity: Quantity to cover (defaults to full position)
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            position = self.get_current_position()
+            if not position:
+                logger.warning("No position to add stop loss to")
+                return False
+
+            qty_to_cover = quantity if quantity is not None else abs(float(position['qty']))
+
+            if qty_to_cover <= 0:
+                logger.error(f"Invalid quantity for stop loss: {qty_to_cover}")
+                return False
+
+            # Determine the side to close the position
+            side_to_close = OrderSide.SELL if position['side'] == 'long' else OrderSide.BUY
+
+            logger.info(f"Adding stop loss to position: {side_to_close.value} {qty_to_cover} {self.symbol}")
+            logger.info(f"Stop Price: ${stop_price:.2f}")
+
+            stop_order_data = StopOrderRequest(
+                symbol=self.symbol,
+                qty=qty_to_cover,
+                side=side_to_close,
+                time_in_force=TimeInForce.GTC,
+                stop_price=round(stop_price, 2)
+            )
+
+            order = self.trading_client.submit_order(order_data=stop_order_data)
+
+            logger.info(f"Stop loss order submitted: ID {order.id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding stop loss: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            return False
+
+    def add_take_profit_to_position(
+        self,
+        limit_price: float,
+        quantity: Optional[float] = None
+    ) -> bool:
+        """
+        Add a take profit order to an existing open position
+
+        Args:
+            limit_price: Take profit limit price
+            quantity: Quantity to cover (defaults to full position)
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            position = self.get_current_position()
+            if not position:
+                logger.warning("No position to add take profit to")
+                return False
+
+            qty_to_cover = quantity if quantity is not None else abs(float(position['qty']))
+
+            if qty_to_cover <= 0:
+                logger.error(f"Invalid quantity for take profit: {qty_to_cover}")
+                return False
+
+            # Determine the side to close the position
+            side_to_close = OrderSide.SELL if position['side'] == 'long' else OrderSide.BUY
+
+            logger.info(f"Adding take profit to position: {side_to_close.value} {qty_to_cover} {self.symbol}")
+            logger.info(f"Limit Price: ${limit_price:.2f}")
+
+            take_profit_order_data = LimitOrderRequest(
+                symbol=self.symbol,
+                qty=qty_to_cover,
+                side=side_to_close,
+                time_in_force=TimeInForce.GTC,
+                limit_price=round(limit_price, 2)
+            )
+
+            order = self.trading_client.submit_order(order_data=take_profit_order_data)
+
+            logger.info(f"Take profit order submitted: ID {order.id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding take profit: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            return False
+
+    def place_oco_order(
+        self,
+        side: OrderSide,
+        quantity: float,
+        take_profit_price: float,
+        stop_loss_price: float
+    ) -> bool:
+        """
+        Place an OCO (One-Cancels-Other) order
+        OCO orders are similar to bracket orders but for closing positions
+
+        Args:
+            side: OrderSide.BUY or OrderSide.SELL
+            quantity: Quantity to trade
+            take_profit_price: Take profit limit price
+            stop_loss_price: Stop loss price
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            if quantity <= 0:
+                logger.error(f"Invalid quantity for OCO order: {quantity}")
+                return False
+
+            logger.info(f"Placing OCO order: {side.value} {quantity} {self.symbol}")
+            logger.info(f"TP: ${take_profit_price:.2f}, SL: ${stop_loss_price:.2f}")
+
+            # Create OCO order
+            oco_order = MarketOrderRequest(
+                symbol=self.symbol,
+                qty=quantity,
+                side=side,
+                time_in_force=TimeInForce.GTC,
+                order_class=OrderClass.OCO,
+                take_profit=TakeProfitRequest(
+                    limit_price=round(take_profit_price, 2)
+                ),
+                stop_loss=StopLossRequest(
+                    stop_price=round(stop_loss_price, 2)
+                )
+            )
+
+            order = self.trading_client.submit_order(order_data=oco_order)
+
+            logger.info(f"OCO order submitted: ID {order.id}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error placing OCO order: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            return False
+
+    def cancel_all_orders_for_symbol(self) -> bool:
+        """
+        Cancel all open orders for the current symbol
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            logger.info(f"Canceling all orders for {self.symbol}")
+
+            # Get all open orders
+            request = GetOrdersRequest(
+                status='open',
+                symbols=[self.symbol]
+            )
+            orders = self.trading_client.get_orders(filter=request)
+
+            if not orders:
+                logger.info("No open orders to cancel")
+                return True
+
+            # Cancel each order
+            cancelled_count = 0
+            for order in orders:
+                try:
+                    self.trading_client.cancel_order_by_id(order.id)
+                    cancelled_count += 1
+                    logger.info(f"Cancelled order {order.id}")
+                except Exception as e:
+                    logger.error(f"Failed to cancel order {order.id}: {e}")
+
+            logger.info(f"Cancelled {cancelled_count}/{len(orders)} orders")
+            return cancelled_count == len(orders)
+
+        except Exception as e:
+            logger.error(f"Error canceling orders: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
+            return False
+
+    def _get_current_price(self) -> Optional[float]:
+        """
+        Get current market price for the symbol
+
+        Returns:
+            float: Current price or None if unavailable
+        """
+        try:
+            # Try to get from recent data
+            end_date = datetime.now()
+            start_date = end_date - timedelta(hours=1)
+
+            if self.is_crypto:
+                data = self.strategy_bot.get_crypto_data(
+                    symbol=self.symbol,
+                    start_date=start_date.strftime("%Y-%m-%d"),
+                    end_date=end_date.strftime("%Y-%m-%d")
+                )
+            else:
+                data = self.strategy_bot.get_stock_data(
+                    symbol=self.symbol,
+                    start_date=start_date.strftime("%Y-%m-%d"),
+                    end_date=end_date.strftime("%Y-%m-%d")
+                )
+
+            if not data.empty:
+                return float(data['Close'].iloc[-1])
+
+            # Fallback: try to get from position
+            position = self.get_current_position()
+            if position and 'current_price' in position:
+                return float(position['current_price'])
+
+            logger.warning("Could not determine current price")
+            return None
+
+        except Exception as e:
+            logger.error(f"Error getting current price: {e}")
+            return None
+
+    def get_open_orders(self) -> list:
+        """
+        Get all open orders for the symbol
+
+        Returns:
+            list: List of open orders
+        """
+        try:
+            request = GetOrdersRequest(
+                status='open',
+                symbols=[self.symbol]
+            )
+            orders = self.trading_client.get_orders(filter=request)
+
+            order_list = []
+            for order in orders:
+                order_list.append({
+                    'id': str(order.id),
+                    'symbol': order.symbol,
+                    'side': order.side,
+                    'qty': float(order.qty),
+                    'type': order.type,
+                    'status': order.status,
+                    'limit_price': float(order.limit_price) if order.limit_price else None,
+                    'stop_price': float(order.stop_price) if order.stop_price else None,
+                    'created_at': str(order.created_at)
+                })
+
+            return order_list
+
+        except Exception as e:
+            logger.error(f"Error getting open orders: {e}")
+            return []
+
+    def update_stop_loss(self, new_stop_price: float) -> bool:
+        """
+        Update existing stop loss order (trailing stop functionality)
+
+        Args:
+            new_stop_price: New stop price
+
+        Returns:
+            bool: Success status
+        """
+        try:
+            # Get current open orders
+            open_orders = self.get_open_orders()
+
+            # Find stop loss orders
+            stop_orders = [o for o in open_orders if o.get('stop_price') is not None]
+
+            if not stop_orders:
+                logger.warning("No stop loss orders found to update")
+                return self.add_stop_loss_to_position(stop_price=new_stop_price)
+
+            # Cancel old stop orders and place new one
+            for order in stop_orders:
+                try:
+                    self.trading_client.cancel_order_by_id(order['id'])
+                    logger.info(f"Cancelled old stop order {order['id']}")
+                except Exception as e:
+                    logger.error(f"Failed to cancel order {order['id']}: {e}")
+
+            # Place new stop loss
+            return self.add_stop_loss_to_position(stop_price=new_stop_price)
+
+        except Exception as e:
+            logger.error(f"Error updating stop loss: {e}")
+            return False
+
     def calculate_position_size(self, current_price: float) -> float:
         """Calculate appropriate position size with detailed error handling"""
         try:
             logger.info(f"Calculating position size for price: ${current_price}")
-            
+
             account_info = self.get_account_info()
             if not account_info:
                 logger.error("No account info available for position sizing")
@@ -672,7 +1044,7 @@ class AlpacaLiveTrader:
 
             portfolio_value = account_info.get('portfolio_value', 0)
             buying_power = account_info.get('buying_power', 0)
-            
+
             logger.info(f"Account values - Portfolio: ${portfolio_value}, Buying Power: ${buying_power}")
 
             if portfolio_value <= 0:
@@ -685,10 +1057,10 @@ class AlpacaLiveTrader:
 
             # Choose the smaller of risk-based or max position
             position_value = min(risk_amount, max_position_value)
-            
+
             # Also limit by buying power
             position_value = min(position_value, buying_power * 0.95)  # Leave 5% margin
-            
+
             logger.info(f"Position sizing - Risk: ${risk_amount}, Max: ${max_position_value}, Available: ${buying_power}")
             logger.info(f"Selected position value: ${position_value}")
 
@@ -700,17 +1072,17 @@ class AlpacaLiveTrader:
                 # Crypto supports fractional trading
                 quantity = position_value / current_price
                 quantity = round(quantity, 6)  # 6 decimal precision
-                
+
                 # Check minimum order size for crypto (typically $1-$10)
                 min_order_value = 10.0  # $10 minimum
                 if quantity * current_price < min_order_value:
                     logger.warning(f"Order value ${quantity * current_price} below minimum ${min_order_value}")
                     return 0.0
-                    
+
             else:
                 # Stocks - whole shares only
                 quantity = int(position_value / current_price)
-                
+
                 # Ensure at least 1 share
                 if quantity < 1:
                     logger.warning(f"Position size less than 1 share: {quantity}")
@@ -733,7 +1105,7 @@ class AlpacaLiveTrader:
                 return False
 
             logger.info(f"Attempting to place order: {side.value} {quantity} {self.symbol}")
-            
+
             market_order_data = MarketOrderRequest(
                 symbol=self.symbol,
                 qty=quantity,
@@ -760,12 +1132,12 @@ class AlpacaLiveTrader:
             logger.error(f"Error placing market order: {e}")
             logger.error(f"Error type: {type(e).__name__}")
             logger.error(f"Order details - Side: {side}, Quantity: {quantity}, Symbol: {self.symbol}")
-            
+
             # Try to get more specific error information
             if hasattr(e, 'response'):
                 logger.error(f"Response status code: {e.response.status_code}")
                 logger.error(f"Response text: {e.response.text}")
-            
+
             return False
 
     def close_position(self) -> bool:
@@ -798,7 +1170,7 @@ class AlpacaLiveTrader:
         if self.stop_trading_flag:
             logger.info("Trading stopped by stop flag")
             return False
-        
+
         # Check max runtime if configured
         if self.config.max_runtime_minutes and self.start_time:
             elapsed_minutes = (datetime.now() - self.start_time).total_seconds() / 60
@@ -808,8 +1180,9 @@ class AlpacaLiveTrader:
             else:
                 remaining_minutes = self.config.max_runtime_minutes - elapsed_minutes
                 logger.debug(f"Runtime remaining: {remaining_minutes:.1f} minutes")
-        
+
         return True
+
     def should_trade(self, signal: int) -> bool:
         """Check if trading conditions are met"""
         # Check if trading should continue
@@ -844,22 +1217,83 @@ class AlpacaLiveTrader:
         return True
 
     def execute_trade(self, signal: TradeSignal) -> bool:
-        """Execute trade based on signal with comprehensive error handling"""
+        """
+        Execute trade with bracket order (stop loss + take profit)
+        This replaces or supplements the original execute_trade method
+        """
         try:
-            logger.info(f"Executing trade - Signal: {signal.signal}, Price: ${signal.price}, Symbol: {signal.symbol}")
-            
+            logger.info(f"Executing trade with bracket - Signal: {signal.signal}, Price: ${signal.price}")
+
             if not self.should_trade(signal.signal):
                 logger.info("Trade conditions not met")
                 return False
 
             current_position = self.get_current_position()
             logger.info(f"Current position: {current_position}")
-            
+
+            success = False
+
+            if signal.signal == 1:  # Buy signal
+                logger.info("Processing BUY signal with bracket order")
+
+                # Close any existing short position first
+                if current_position and current_position['side'] == 'short':
+                    logger.info("Closing short position before going long")
+                    self.cancel_all_orders_for_symbol()  # Cancel pending orders
+                    self.close_position()
+                    time.sleep(2)
+
+                # Open long with bracket order
+                if not current_position or current_position['side'] != 'long':
+                    quantity = self.calculate_position_size(signal.price)
+                    logger.info(f"Calculated position size: {quantity}")
+
+                    if quantity > 0:
+                        # Place bracket order with automatic stop loss and take profit
+                        success = self.place_bracket_order(
+                            side=OrderSide.BUY,
+                            quantity=quantity
+                        )
+                        if success:
+                            logger.info(f"LONG position opened with bracket at ${signal.price:.2f}")
+
+            elif signal.signal == -1:  # Sell signal
+                logger.info("Processing SELL signal")
+
+                if current_position and current_position['side'] == 'long':
+                    # Cancel any pending orders and close position
+                    self.cancel_all_orders_for_symbol()
+                    success = self.close_position()
+                    if success:
+                        logger.info(f"LONG position closed at ${signal.price:.2f}")
+
+            if success:
+                self.last_signal = signal.signal
+                logger.info(f"Trade executed successfully with bracket orders")
+
+            return success
+
+        except Exception as e:
+            logger.error(f"Error executing trade with bracket: {e}")
+            return False
+
+    def _execute_trade(self, signal: TradeSignal) -> bool:
+        """Execute trade based on signal with comprehensive error handling"""
+        try:
+            logger.info(f"Executing trade - Signal: {signal.signal}, Price: ${signal.price}, Symbol: {signal.symbol}")
+
+            if not self.should_trade(signal.signal):
+                logger.info("Trade conditions not met")
+                return False
+
+            current_position = self.get_current_position()
+            logger.info(f"Current position: {current_position}")
+
             success = False
 
             if signal.signal == 1:  # Buy signal
                 logger.info("Processing BUY signal")
-                
+
                 if current_position and current_position['side'] == 'short':
                     # Close short first
                     logger.info("Closing short position before going long")
@@ -870,17 +1304,17 @@ class AlpacaLiveTrader:
                     # Open long position
                     quantity = self.calculate_position_size(signal.price)
                     logger.info(f"Calculated position size: {quantity}")
-                    
+
                     if quantity > 0:
                         success = self.place_market_order(OrderSide.BUY, quantity)
                         if success:
                             logger.info(f"LONG position opened at ${signal.price:.2f}")
                     else:
                         logger.error("Cannot open position - invalid quantity")
-                        
+
             elif signal.signal == -1:  # Sell signal
                 logger.info("Processing SELL signal")
-                
+
                 if current_position and current_position['side'] == 'long':
                     # Close long position
                     success = self.close_position()
@@ -932,7 +1366,7 @@ class AlpacaLiveTrader:
             if data.empty:
                 logger.error("No data available for signal generation")
                 return None
-                
+
             if len(data) < 100:
                 logger.warning(f"Insufficient data for signal generation: {len(data)} bars")
                 return None
@@ -947,7 +1381,7 @@ class AlpacaLiveTrader:
             # Get latest signal
             latest_signal = int(strategy_data['signal'].iloc[-1])
             latest_price = float(strategy_data['Close'].iloc[-1])
-            
+
             logger.info(f"Generated signal: {latest_signal} at ${latest_price:.2f}")
 
             return TradeSignal(
@@ -979,7 +1413,7 @@ class AlpacaLiveTrader:
             # Execute trade if signal changed
             if signal.signal != self.last_signal:
                 logger.info(f"Signal changed from {self.last_signal} to {signal.signal}")
-                success = self.execute_trade(signal)
+                success = self._execute_trade(signal)
                 logger.info(f"Trade execution: {'SUCCESS' if success else 'FAILED'}")
                 return success
             else:
@@ -994,12 +1428,12 @@ class AlpacaLiveTrader:
     def start_live_trading(self):
         """Start live trading loop with runtime management"""
         self.start_time = datetime.now()
-        
+
         logger.info("Starting live trading...")
         logger.info(f"Symbol: {self.symbol}")
         logger.info(f"Paper trading: {self.paper_trading}")
         logger.info(f"Check interval: {self.config.check_interval}s")
-        
+
         if self.config.max_runtime_minutes:
             logger.info(f"Max runtime: {self.config.max_runtime_minutes} minutes")
             end_time = self.start_time + timedelta(minutes=self.config.max_runtime_minutes)
@@ -1025,7 +1459,7 @@ class AlpacaLiveTrader:
                     if not self.should_continue_trading():
                         break
                     time.sleep(1)
-                    
+
                     # Log periodic runtime updates
                     if self.config.max_runtime_minutes and i % 300 == 0:  # Every 5 minutes
                         elapsed = (datetime.now() - self.start_time).total_seconds() / 60
@@ -1090,34 +1524,36 @@ class AlpacaLiveTrader:
         """Test API connection and trading capabilities"""
         try:
             logger.info("Testing API connection...")
-            
+
             # Test account access
             account_info = self.get_account_info()
             if not account_info:
                 logger.error("Failed to get account info")
                 return False
-            
+
             logger.info(f"Account test passed - Portfolio: ${account_info.get('portfolio_value', 0):,.2f}")
-            
+
             # Test position retrieval
             position = self.get_current_position()
             logger.info(f"Position test passed - Current position: {position}")
-            
+
             # Test signal generation
             signal = self.generate_signal()
             if signal is None:
                 logger.error("Failed to generate signal")
                 return False
-                
+
             logger.info(f"Signal test passed - Generated: {signal.signal} at ${signal.price:.2f}")
-            
+
             logger.info("All API tests passed successfully")
             return True
-            
+
         except Exception as e:
             logger.error(f"API connection test failed: {e}")
             logger.error(f"Error type: {type(e).__name__}")
             return False
+
+
 
 
 class AlpacaStrategyWrapper(Strategy):
