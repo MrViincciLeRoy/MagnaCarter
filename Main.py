@@ -38,7 +38,7 @@ except ImportError:
 
 try:
     # Import notebook system
-    from .magnaNotebook import NotebookTradingSystem, NotebookTradingConfig
+    from magnaNotebook import NotebookTradingSystem, NotebookTradingConfig
     HAS_NOTEBOOK_SYSTEM = True
 except ImportError:
     HAS_NOTEBOOK_SYSTEM = False
