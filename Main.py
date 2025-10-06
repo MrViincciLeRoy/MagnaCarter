@@ -672,7 +672,8 @@ def main():
     print("Use ONLY for educational purposes and paper trading.")
     print("="*60)
     
-    user_confirm = input("\nDo you understand these risks and want to continue? (yes/no): ")
+    #user_confirm = input("\nDo you understand these risks and want to continue? (yes/no): ")
+    user_confirm = 'yes' 
     if user_confirm.lower() != 'yes':
         print("Operation cancelled.")
         return
