@@ -16,7 +16,7 @@ on:
       symbol:
         description: 'Trading symbol (or "ALL" for market scan)'
         required: false
-        default: 'ALL'
+        default: 'DIA'
         type: string
       paper_trading:
         description: 'Use paper trading'
@@ -147,7 +147,7 @@ jobs:
       run: |
         python Main.py \
           --mode live \
-          --symbol "${{ github.event.inputs.symbol }}"  }}
+          --symbol "${{ github.event.inputs.symbol }}" 
     
     - name: Run multi-symbol trading (manual - multi mode)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'multi'
