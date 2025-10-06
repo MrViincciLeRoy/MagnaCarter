@@ -25,7 +25,7 @@ jobs:
 
       - name: Create test import script
         run: |
-          echo "from magnaNotebook import *" > test_import.py
+          echo "from magna_notebook import *" > test_import.py
           echo "print('Import successful!')" >> test_import.py
 
       - name: Run import test
