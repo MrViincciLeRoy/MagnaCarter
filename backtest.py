@@ -569,9 +569,9 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 # Assuming these are defined elsewhere
-#from your_module import LiveTradingConfig, AlpacaMegaCryptoBotFixed, TradeSignal
+from your_module import LiveTradingConfig, AlpacaMegaCryptoBotFixed, TradeSignal
 
-#logger = ...  # Assume logger is configured elsewhere
+logger = ...  # Assume logger is configured elsewhere
 
 
 class AlpacaLiveTrader:
@@ -1218,26 +1218,34 @@ class AlpacaLiveTrader:
     def execute_trade(self, signal: TradeSignal) -> bool:
         """
         Execute trade with crypto-compatible bracket simulation
+        Now supports both LONG and SHORT positions
         """
         try:
             logger.info(f"Executing trade - Signal: {signal.signal}, Price: ${signal.price}")
+            
             if not self.should_trade(signal.signal):
                 logger.info("Trade conditions not met")
                 return False
+            
             current_position = self.get_current_position()
             logger.info(f"Current position: {current_position}")
+            
             success = False
-            if signal.signal == 1:  # Buy signal
+            
+            if signal.signal == 1:  # Buy signal - Open LONG
                 logger.info("Processing BUY signal")
+                
                 # Close any existing position first
                 if current_position:
                     logger.info(f"Closing existing {current_position['side']} position")
                     self.cancel_all_orders_for_symbol()
                     self.close_position()
                     time.sleep(2)
+                
                 # Open long with simulated bracket
                 quantity = self.calculate_position_size(signal.price)
                 logger.info(f"Calculated position size: {quantity}")
+                
                 if quantity > 0:
                     success = self.execute_crypto_bracket_trade(
                         side=OrderSide.BUY,
@@ -1246,22 +1254,50 @@ class AlpacaLiveTrader:
                     )
                     if success:
                         logger.info(f"LONG position opened with bracket at ${signal.price:.2f}")
-            elif signal.signal == -1:  # Sell signal
+            
+            elif signal.signal == -1:  # Sell signal - Open SHORT
                 logger.info("Processing SELL signal")
-                if current_position and current_position['side'] == 'long':
+                
+                # Close any existing position first
+                if current_position:
+                    logger.info(f"Closing existing {current_position['side']} position")
+                    self.cancel_all_orders_for_symbol()
+                    self.close_position()
+                    time.sleep(2)
+                
+                # Open short with simulated bracket
+                quantity = self.calculate_position_size(signal.price)
+                logger.info(f"Calculated position size: {quantity}")
+                
+                if quantity > 0:
+                    success = self.execute_crypto_bracket_trade(
+                        side=OrderSide.SELL,
+                        quantity=quantity,
+                        entry_price=signal.price
+                    )
+                    if success:
+                        logger.info(f"SHORT position opened with bracket at ${signal.price:.2f}")
+            
+            elif signal.signal == 0:  # Neutral signal - Close any position
+                logger.info("Processing NEUTRAL signal")
+                
+                if current_position:
                     # Cancel pending orders and close position
                     self.cancel_all_orders_for_symbol()
                     success = self.close_position()
                     if success:
-                        logger.info(f"LONG position closed at ${signal.price:.2f}")
+                        logger.info(f"Position closed at ${signal.price:.2f}")
                 else:
-                    # No position to close - not an error for long-only
+                    # No position to close
                     logger.info("No position to close - remaining flat")
                     success = True
+            
             if success:
                 self.last_signal = signal.signal
                 logger.info(f"Trade executed successfully")
+            
             return success
+            
         except Exception as e:
             logger.error(f"Error executing trade: {e}")
             return False
@@ -1271,7 +1307,7 @@ class AlpacaLiveTrader:
         try:
             # Get recent data for analysis
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=7)  # Get last week
+            start_date = end_date - timedelta(days=30)  # Get last week
             logger.info(f"Generating signal for {self.symbol}")
             if self.is_crypto:
                 data = self.strategy_bot.get_crypto_data(
@@ -1445,7 +1481,6 @@ class AlpacaLiveTrader:
             logger.error(f"API connection test failed: {e}")
             logger.error(f"Error type: {type(e).__name__}")
             return False
-
 class AlpacaStrategyWrapper(Strategy):
     """
     Backtesting strategy wrapper for the Alpaca crypto bot
@@ -1817,7 +1852,7 @@ def demo_live_trading():
 
     # Initialize system
     system = AlpacaBacktester(
-        api_key=os.getenv('ALPACA_API_KEY' ),
+        api_key=os.getenv('ALPACA_API_KEY'),
         secret_key=os.getenv('ALPACA_SECRET_KEY' ),
         paper_trading=True,
         # Strategy parameters
@@ -1837,7 +1872,7 @@ def demo_live_trading():
 
     # Start live trading
     trader = system.start_live_trading(
-        symbol="BTC/USD",
+        symbol="DIA",
         config=config,
         background=False  # Run in main thread
     )
