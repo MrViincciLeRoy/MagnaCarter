@@ -569,9 +569,9 @@ from alpaca.trading.requests import (
 from alpaca.trading.enums import OrderSide, TimeInForce
 
 # Assuming these are defined elsewhere
-from your_module import LiveTradingConfig, AlpacaMegaCryptoBotFixed, TradeSignal
+#from your_module import LiveTradingConfig, AlpacaMegaCryptoBotFixed, TradeSignal
 
-logger = ...  # Assume logger is configured elsewhere
+#logger = ...  # Assume logger is configured elsewhere
 
 
 class AlpacaLiveTrader:
