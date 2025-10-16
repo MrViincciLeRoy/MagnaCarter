@@ -1,4 +1,4 @@
-name: Alpaca Market Scanner
+name:Stocks Alpaca Market Scanner 2 stocks 
 
 on:
   # Manual trigger with input options
@@ -73,13 +73,13 @@ jobs:
     
     - name: Set environment variables
       env:
-        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
-        ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL }}
+        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY2 }}
+        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY2 }}
+        ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL2 }}
       run: |
-        echo "ALPACA_API_KEY=$ALPACA_API_KEY" >> $GITHUB_ENV
-        echo "ALPACA_SECRET_KEY=$ALPACA_SECRET_KEY" >> $GITHUB_ENV
-        echo "ALPACA_BASE_URL=$ALPACA_BASE_URL" >> $GITHUB_ENV
+        echo "ALPACA_API_KEY=$ALPACA_API_KEY2" >> $GITHUB_ENV
+        echo "ALPACA_SECRET_KEY=$ALPACA_SECRET_KEY2" >> $GITHUB_ENV
+        echo "ALPACA_BASE_URL=$ALPACA_BASE_URL2" >> $GITHUB_ENV
         echo "MAX_RUNTIME_MINUTES=${{ github.event.inputs.max_runtime || '45' }}" >> $GITHUB_ENV
     
     - name: Check market status
