@@ -67,8 +67,8 @@ class AlpacaMegaCryptoBotFixed:
             **strategy_params: Strategy parameters to override defaults
         """
         # API Configuration
-        self.api_key = api_key or os.getenv('APCA_API_KEY_ID')
-        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY')
+        self.api_key = api_key or os.getenv('APCA_API_KEY_ID2')
+        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY2')
         self.paper_trading = paper_trading
 
         # Initialize Alpaca clients
@@ -1491,8 +1491,8 @@ def demo_live_trading():
 
     # Initialize system
     system = AlpacaBacktester(
-        api_key=os.getenv('ALPACA_API_KEY'),
-        secret_key=os.getenv('ALPACA_SECRET_KEY'),
+        api_key=os.getenv('ALPACA_API_KEY2'),
+        secret_key=os.getenv('ALPACA_SECRET_KEY2'),
         paper_trading=True,
         # Strategy parameters
         len_cbrc=25,
