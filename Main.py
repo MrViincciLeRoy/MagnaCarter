@@ -89,10 +89,10 @@ class UnifiedTradingConfig:
             self.target_symbols = ["BTC/USD", "ETH/USD", "SOL/USD"]
         
         if self.api_key is None:
-            self.api_key = os.getenv('APCA_API_KEY_ID')
+            self.api_key = os.getenv('ALPACA_API_KEY')
         
         if self.secret_key is None:
-            self.secret_key = os.getenv('APCA_API_SECRET_KEY')
+            self.secret_key = os.getenv('ALPACA_SECRET_KEY')
 
 
 class UnifiedTradingSystem:
