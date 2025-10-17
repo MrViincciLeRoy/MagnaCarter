@@ -132,10 +132,10 @@ jobs:
       timeout-minutes: 105
       run: |
         echo "Starting scheduled live test with API Key 2..."
-        python backtest.py \
+        python main.py \
           --mode live \
           --symbol "BTC/USD" \
-          --paper
+          
               
     - name: Run market scan (manual - API Key 2)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'scan'
@@ -165,8 +165,7 @@ jobs:
         echo "Running live trading with API Key 2..."
         python main.py \
           --mode live \
-          --symbol "${{ github.event.inputs.symbol }}" \
-          ${{ github.event.inputs.paper_trading == 'true' && '--paper' || '' }}
+          --symbol "${{ github.event.inputs.symbol }}" 
     
     - name: Run multi-symbol trading (manual - multi mode - API Key 2)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'multi'
