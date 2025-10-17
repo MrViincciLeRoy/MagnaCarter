@@ -119,7 +119,7 @@ jobs:
         python backtest.py \
           --mode live \
           --symbol "BTC/USD" \
-          --paper \
+        
               
     - name: Run market scan (manual)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'scan'
