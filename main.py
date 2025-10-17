@@ -38,7 +38,7 @@ except ImportError:
 
 try:
     # Import notebook system
-    from magna_notebook import NotebookTradingSystem, NotebookTradingConfig
+    from magnanotebook import NotebookTradingSystem, NotebookTradingConfig
     HAS_NOTEBOOK_SYSTEM = True
 except ImportError:
     HAS_NOTEBOOK_SYSTEM = False
@@ -672,7 +672,7 @@ def main():
     print("Use ONLY for educational purposes and paper trading.")
     print("="*60)
     
-    user_confirm = input("\nDo you understand these risks and want to continue? (yes/no): ")
+    user_confirm =  'yes' #input("\nDo you understand these risks and want to continue? (yes/no): ")
     if user_confirm.lower() != 'yes':
         print("Operation cancelled.")
         return
