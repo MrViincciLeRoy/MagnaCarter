@@ -148,9 +148,6 @@ class AlpacaMegaCryptoBotFixed:
         try:
             if end_date is None:
                 end_date = datetime.now().strftime("%Y-%m-%d-%H-%M")
-            _start_datetime = datetime.now() - timedelta(days=30)
-            _start_date = _start_datetime.strftime("%Y-%m-%d")
-
 
             logger.info(f"Fetching {symbol} data from {start_date} to {end_date}")
 
@@ -215,9 +212,6 @@ class AlpacaMegaCryptoBotFixed:
         try:
             if end_date is None:
                 end_date = datetime.now().strftime("%Y-%m-%d")
-                _start_datetime = end_datetime - timedelta(days=30)
-                _start_date = _start_datetime.strftime("%Y-%m-%d")
-
 
             logger.info(f"Fetching {symbol} data from {start_date} to {end_date}")
 
@@ -387,12 +381,12 @@ class AlpacaMegaCryptoBotFixed:
         prev_red = htf_close.shift(1) < htf_open.shift(1)
 
         # Price momentum conditions
-        price_rising = strategy_df['Close'] > strategy_df['Close'].shift(5)  # Price above 5 bars ago
-        price_falling = strategy_df['Close'] < strategy_df['Close'].shift(5)  # Price below 5 bars ago
+        price_rising = strategy_df['Close'] > strategy_df['Close'].shift(5)
+        price_falling = strategy_df['Close'] < strategy_df['Close'].shift(5)
         
         # EMA conditions for trend confirmation
-        ema_bullish = strategy_df['ema1'] > strategy_df['ema2']  # Fast EMA above slow EMA
-        ema_bearish = strategy_df['ema1'] < strategy_df['ema2']  # Fast EMA below slow EMA
+        ema_bullish = strategy_df['ema1'] > strategy_df['ema2']
+        ema_bearish = strategy_df['ema1'] < strategy_df['ema2']
         
         # HMA trend conditions
         hma_rising = strategy_df['hma'] > strategy_df['hma'].shift(3)
@@ -400,15 +394,15 @@ class AlpacaMegaCryptoBotFixed:
 
         # Combined signal conditions (more sensitive)
         long_cond = (
-            (current_green & prev_red) |  # Original: Green after red
-            (price_rising & ema_bullish & hma_rising & current_green) |  # Trend + momentum
-            (strategy_df['Close'] > strategy_df['cbrc_sma'] * 1.02)  # Price breakout above SMA
+            (current_green & prev_red) |
+            (price_rising & ema_bullish & hma_rising & current_green) |
+            (strategy_df['Close'] > strategy_df['cbrc_sma'] * 1.02)
         )
         
         short_cond = (
-            (current_red & prev_green) |  # Original: Red after green  
-            (price_falling & ema_bearish & hma_falling & current_red) |  # Trend + momentum
-            (strategy_df['Close'] < strategy_df['cbrc_sma'] * 0.98)  # Price breakdown below SMA
+            (current_red & prev_green) |
+            (price_falling & ema_bearish & hma_falling & current_red) |
+            (strategy_df['Close'] < strategy_df['cbrc_sma'] * 0.98)
         )
 
         # Initialize signals
@@ -416,7 +410,7 @@ class AlpacaMegaCryptoBotFixed:
         strategy_df.loc[long_cond, 'signal'] = 1
         strategy_df.loc[short_cond, 'signal'] = -1
         
-        # Anti-whipsaw: only change signal if different from previous and held for at least 2 bars
+        # Anti-whipsaw: only change signal if different from previous
         prev_signal = strategy_df['signal'].shift(1).fillna(0)
         signal_changed = strategy_df['signal'] != prev_signal
         
@@ -511,6 +505,8 @@ class AlpacaMegaCryptoBotFixed:
         except Exception as e:
             logger.error(f"Error in debug_signal_generation: {e}")
             return {"error": str(e)}
+
+    def analyze_signals(self, df: pd.DataFrame) -> Dict[str, Any]:
         """Analyze signal distribution and trading opportunities"""
         if 'signal' not in df.columns:
             return {}
@@ -661,7 +657,7 @@ class AlpacaLiveTrader:
             return None
 
     def calculate_position_size(self, current_price: float) -> float:
-        """Calculate appropriate position size with detailed error handling"""
+        """Calculate appropriate position size with minimum order handling"""
         try:
             logger.info(f"Calculating position size for price: ${current_price}")
             
@@ -679,32 +675,53 @@ class AlpacaLiveTrader:
                 logger.error("Invalid portfolio value")
                 return 0.0
 
+            # Define minimum order value for crypto/stock
+            MIN_ORDER_VALUE = 10.0 if self.is_crypto else 1.0
+            
             # Use risk-based position sizing
             risk_amount = portfolio_value * self.config.risk_per_trade
             max_position_value = portfolio_value * self.config.max_position_size
-
+            
             # Choose the smaller of risk-based or max position
             position_value = min(risk_amount, max_position_value)
             
-            # Also limit by buying power
-            position_value = min(position_value, buying_power * 0.95)  # Leave 5% margin
+            # Also limit by buying power (leave 5% margin)
+            position_value = min(position_value, buying_power * 0.95)
             
             logger.info(f"Position sizing - Risk: ${risk_amount}, Max: ${max_position_value}, Available: ${buying_power}")
-            logger.info(f"Selected position value: ${position_value}")
+            logger.info(f"Initial position value: ${position_value}")
+
+            # CRITICAL: Check if position meets minimum order requirement
+            if position_value < MIN_ORDER_VALUE:
+                logger.warning(f"Position value ${position_value:.2f} below minimum ${MIN_ORDER_VALUE:.2f}")
+                
+                # Scale up to meet minimum order requirement
+                if buying_power >= MIN_ORDER_VALUE:
+                    logger.info(f"Scaling up to minimum order value: ${MIN_ORDER_VALUE:.2f}")
+                    position_value = MIN_ORDER_VALUE
+                    
+                    # Log the adjustment
+                    original_risk_pct = self.config.risk_per_trade * 100
+                    actual_risk_pct = (position_value / portfolio_value) * 100
+                    logger.warning(f"Risk adjusted from {original_risk_pct:.2f}% to {actual_risk_pct:.2f}% to meet minimum order")
+                else:
+                    logger.error(f"Insufficient buying power for minimum order: ${buying_power} < ${MIN_ORDER_VALUE}")
+                    return 0.0
 
             if position_value <= 0:
-                logger.warning("Position value is zero or negative")
+                logger.warning("Position value is zero or negative after minimum order check")
                 return 0.0
 
+            # Calculate quantity
             if self.is_crypto:
                 # Crypto supports fractional trading
                 quantity = position_value / current_price
                 quantity = round(quantity, 6)  # 6 decimal precision
                 
-                # Check minimum order size for crypto (typically $1-$10)
-                min_order_value = 10.0  # $10 minimum
-                if quantity * current_price < min_order_value:
-                    logger.warning(f"Order value ${quantity * current_price} below minimum ${min_order_value}")
+                # Final validation
+                order_value = quantity * current_price
+                if order_value < MIN_ORDER_VALUE:
+                    logger.error(f"Final order value ${order_value:.2f} still below minimum ${MIN_ORDER_VALUE:.2f}")
                     return 0.0
                     
             else:
@@ -714,9 +731,18 @@ class AlpacaLiveTrader:
                 # Ensure at least 1 share
                 if quantity < 1:
                     logger.warning(f"Position size less than 1 share: {quantity}")
-                    return 0.0
+                    # Try to buy 1 share if we have enough buying power
+                    share_cost = current_price
+                    if share_cost <= buying_power * 0.95:
+                        logger.info(f"Buying 1 share at ${current_price:.2f}")
+                        quantity = 1
+                    else:
+                        logger.error(f"Cannot afford 1 share: ${share_cost:.2f} > ${buying_power * 0.95:.2f}")
+                        return 0.0
 
-            logger.info(f"Calculated position size: {quantity} units at ${current_price:.2f} = ${quantity * current_price:.2f}")
+            final_order_value = quantity * current_price
+            logger.info(f"Final position size: {quantity} units at ${current_price:.2f} = ${final_order_value:.2f}")
+            
             return quantity
 
         except Exception as e:
@@ -810,8 +836,9 @@ class AlpacaLiveTrader:
                 logger.debug(f"Runtime remaining: {remaining_minutes:.1f} minutes")
         
         return True
+
     def should_trade(self, signal: int) -> bool:
-        """Check if trading conditions are met"""
+        """Check if trading conditions are met with account balance consideration"""
         # Check if trading should continue
         if not self.should_continue_trading():
             return False
@@ -839,6 +866,16 @@ class AlpacaLiveTrader:
         if signal == self.last_signal:
             logger.debug(f"Signal unchanged: {signal}")
             return False
+
+        # NEW: Check if we have sufficient buying power for a trade
+        account_info = self.get_account_info()
+        if account_info:
+            buying_power = account_info.get('buying_power', 0)
+            MIN_ORDER_VALUE = 10.0 if self.is_crypto else 1.0
+            
+            if buying_power < MIN_ORDER_VALUE:
+                logger.warning(f"Insufficient buying power for trade: ${buying_power} < ${MIN_ORDER_VALUE}")
+                return False
 
         logger.info(f"Trading conditions met. Signal: {signal}, Last: {self.last_signal}")
         return True
@@ -912,7 +949,7 @@ class AlpacaLiveTrader:
         try:
             # Get recent data for analysis
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=30)  # Get last week
+            start_date = end_date - timedelta(days=30)  # Get last month
 
             logger.info(f"Generating signal for {self.symbol}")
 
@@ -1129,8 +1166,6 @@ class AlpacaStrategyWrapper(Strategy):
         """Initialize strategy variables"""
         self.signal = self.I(lambda x: x, self.data.signal)
         self.last_signal = 0
-
-        # Track performance metrics
         self.trade_count = 0
 
     def next(self):
@@ -1387,7 +1422,7 @@ class AlpacaBacktester:
 
             # --- 6. Performance Analysis ---
             if not check_runtime():
-                return stats, strategy_data  # Return partial results
+                return stats, strategy_data
                 
             self._print_results(stats, strategy_data, symbol)
 
@@ -1443,9 +1478,6 @@ class AlpacaBacktester:
             return 0.0
 
 
-# ==============================================================================
-# EXAMPLE USAGE AND DEMOS
-# ==============================================================================
 def get_runtime_from_env() -> Optional[int]:
     """Get max runtime from environment variable"""
     try:
@@ -1467,7 +1499,6 @@ def demo_backtest():
         api_key=os.getenv('ALPACA_API_KEY'),
         secret_key=os.getenv('ALPACA_SECRET_KEY'),
         paper_trading=True,
-        # Strategy parameters
         len_cbrc=30,
         signal_period='360min'
     )
@@ -1494,26 +1525,25 @@ def demo_live_trading():
         api_key=os.getenv('ALPACA_API_KEY'),
         secret_key=os.getenv('ALPACA_SECRET_KEY'),
         paper_trading=True,
-        # Strategy parameters
         len_cbrc=25,
         signal_period='360min'
     )
 
-    # Configure live trading with more aggressive settings for signal generation
+    # Configure live trading with minimum order handling
     config = LiveTradingConfig(
-        max_position_size=0.5,      # Use 50% of portfolio
-        max_daily_trades=5,         # Max 5 trades per day
-        min_trade_interval=1800,    # 30 min between trades
-        check_interval=300,         # Check every 15 min (more frequent)
-        risk_per_trade=0.02,        # Risk 2% per trade
-        max_runtime_minutes=max_runtime  # Use environment variable
+        max_position_size=0.5,
+        max_daily_trades=5,
+        min_trade_interval=1800,
+        check_interval=300,
+        risk_per_trade=0.02,
+        max_runtime_minutes=max_runtime
     )
 
     # Start live trading
     trader = system.start_live_trading(
         symbol="BTC/USD",
         config=config,
-        background=False  # Run in main thread
+        background=False
     )
 
     return system
@@ -1557,7 +1587,7 @@ def demo_multi_symbol_trading():
         system.start_live_trading(
             symbol=symbol,
             config=config,
-            background=True  # Run all in background
+            background=True
         )
 
     # Monitor all traders with runtime awareness
@@ -1573,7 +1603,7 @@ def demo_multi_symbol_trading():
                     
             summary = system.get_live_trading_summary()
             logger.info(f"Active traders: {summary['active_traders']}")
-            time.sleep(60)  # Check every minute
+            time.sleep(60)
     except KeyboardInterrupt:
         logger.info("Stopping all traders...")
     finally:
