@@ -1,4 +1,4 @@
-name:Stocks Alpaca Market Scanner 2 stocks 
+name: Alpaca Market Scanner - Alternative (API Key 2)
 
 on:
   # Manual trigger with input options
@@ -29,24 +29,30 @@ on:
         default: '55'
         type: string
 
-  # Market scanning every 4 hours during market hours
-  # Runs at: 9:30 AM, 1:30 PM EST (market hours)
-  # and 6:00 AM, 10:00 AM, 2:00 PM, 6:00 PM UTC for global markets
+  # Market scanning every 4 hours during market hours (offset from main.yml)
+  # Runs 2 hours after main.yml to avoid conflicts
+  # Runs at: 11:30 AM, 3:30 PM EST
+  # and 8:00 AM, 12:00 PM, 4:00 PM, 8:00 PM UTC for global markets
   schedule:
-    - cron: '0 */4 * * 1-5' 
+    - cron: '0 8,12,16,20 * * 1-5'
 
-  # Trigger on push to main branch (optional)
+  # Trigger on push to develop branch (optional)
   push:
-    branches: [ main ]
+    branches: [ develop ]
     paths: 
       - 'market_scanner.py'
       - 'backtest.py'
       - '**.py'
 
+# Concurrency control to prevent multiple jobs running simultaneously
+concurrency:
+  group: trading-jobs
+  cancel-in-progress: false
+
 jobs:
-  market-scanner:
+  market-scanner-alt:
     runs-on: ubuntu-latest
-    timeout-minutes: 60 # Hard limit to respect GitHub's resources
+    timeout-minutes: 60
     
     # Only run during weekdays to avoid unnecessary weekend runs
     if: github.event_name == 'workflow_dispatch' || (github.event_name == 'schedule' && github.event.schedule != '0 6 * * 6,0') || github.event_name == 'push'
@@ -71,16 +77,26 @@ jobs:
           pip install alpaca-py pandas numpy matplotlib yfinance requests
         fi
     
-    - name: Set environment variables
+    - name: Set environment variables (API Key 2)
       env:
-        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY2 }}
-        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY2 }}
-        ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL2 }}
+        ALPACA_API_KEY_2: ${{ secrets.ALPACA_API_KEY2 }}
+        ALPACA_SECRET_KEY_2: ${{ secrets.ALPACA_SECRET_KEY2 }}
+        ALPACA_BASE_URL_2: ${{ secrets.ALPACA_BASE_URL2 }}
       run: |
-        echo "ALPACA_API_KEY=$ALPACA_API_KEY2" >> $GITHUB_ENV
-        echo "ALPACA_SECRET_KEY=$ALPACA_SECRET_KEY2" >> $GITHUB_ENV
-        echo "ALPACA_BASE_URL=$ALPACA_BASE_URL2" >> $GITHUB_ENV
+        echo "ALPACA_API_KEY=$ALPACA_API_KEY_2" >> $GITHUB_ENV
+        echo "ALPACA_SECRET_KEY=$ALPACA_SECRET_KEY_2" >> $GITHUB_ENV
+        echo "ALPACA_BASE_URL=$ALPACA_BASE_URL_2" >> $GITHUB_ENV
         echo "MAX_RUNTIME_MINUTES=${{ github.event.inputs.max_runtime || '45' }}" >> $GITHUB_ENV
+        echo "API_KEY_SET=2" >> $GITHUB_ENV
+    
+    - name: Verify API Key Configuration
+      run: |
+        if [ -z "$ALPACA_API_KEY" ] || [ -z "$ALPACA_SECRET_KEY" ]; then
+          echo "ERROR: API Key 2 secrets not configured!"
+          echo "Please add ALPACA_API_KEY2, ALPACA_SECRET_KEY2, and ALPACA_BASE_URL2 to GitHub Secrets"
+          exit 1
+        fi
+        echo "✓ API Key 2 configuration loaded successfully"
     
     - name: Check market status
       id: market_check
@@ -107,53 +123,56 @@ jobs:
             
         except Exception as e:
             print(f'Market check failed: {e}')
-            print('::set-output name=market_open::true')  # Default to run
+            print('::set-output name=market_open::true')
             print('::set-output name=extended_hours::true')
         "
     
-    - name: Run live test (scheduled)
+    - name: Run live test (scheduled - API Key 2)
       if: github.event_name == 'schedule'
-      timeout-minutes: 105 
+      timeout-minutes: 105
       run: |
-        echo "Starting scheduled live test..."
+        echo "Starting scheduled live test with API Key 2..."
         python backtest.py \
           --mode live \
           --symbol "BTC/USD" \
-          --paper \
+          --paper
               
-    - name: Run market scan (manual)
+    - name: Run market scan (manual - API Key 2)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'scan'
       timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
-        echo "Starting manual market scan..."
+        echo "Starting manual market scan with API Key 2..."
         python market_scanner.py \
           --mode scan \
           --symbol "${{ github.event.inputs.symbol }}" \
           ${{ github.event.inputs.paper_trading == 'true' && '--paper' || '' }} \
           || echo "Scan completed with warnings"
     
-    - name: Run backtest (manual - backtest mode)
+    - name: Run backtest (manual - backtest mode - API Key 2)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'backtest'
       timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
-        python backtest.py \
+        echo "Running backtest with API Key 2..."
+        python main.py \
           --mode backtest \
           --symbol "${{ github.event.inputs.symbol }}" \
           ${{ github.event.inputs.paper_trading == 'true' && '--paper' || '' }}
     
-    - name: Run live trading (manual - live mode)
+    - name: Run live trading (manual - live mode - API Key 2)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'live'
       timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
-        python backtest.py \
+        echo "Running live trading with API Key 2..."
+        python main.py \
           --mode live \
           --symbol "${{ github.event.inputs.symbol }}" \
           ${{ github.event.inputs.paper_trading == 'true' && '--paper' || '' }}
     
-    - name: Run multi-symbol trading (manual - multi mode)
+    - name: Run multi-symbol trading (manual - multi mode - API Key 2)
       if: github.event_name == 'workflow_dispatch' && github.event.inputs.mode == 'multi'
       timeout-minutes: ${{ fromJSON(github.event.inputs.max_runtime || '45') }}
       run: |
+        echo "Running multi-symbol trading with API Key 2..."
         python backtest.py \
           --mode multi \
           --symbol "${{ github.event.inputs.symbol }}" \
@@ -174,7 +193,7 @@ jobs:
       if: always()
       uses: actions/upload-artifact@v4
       with:
-        name: live-test-results-${{ github.run_number }}
+        name: alt-test-results-${{ github.run_number }}
         path: |
           live_test_results/
           scan_results/
@@ -184,15 +203,16 @@ jobs:
           *.log
           *.log.gz
           results/
-        retention-days: 7  # Reduced retention to save storage
+        retention-days: 7
 
-    - name: Create execution summary
+    - name: Create execution summary (API Key 2)
       if: always()
       run: |
-        echo "## 📊 Live Trading Test Execution Report" >> $GITHUB_STEP_SUMMARY
+        echo "## 📊 Alternative Trading Test Execution Report (API Key 2)" >> $GITHUB_STEP_SUMMARY
         echo "- **Mode**: ${{ github.event.inputs.mode || 'scan' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Symbol**: ${{ github.event.inputs.symbol || 'ALL' }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Paper Trading**: ${{ github.event.inputs.paper_trading || 'true' }}" >> $GITHUB_STEP_SUMMARY
+        echo "- **API Key Set**: 2 (Secondary)" >> $GITHUB_STEP_SUMMARY
         echo "- **Max Runtime**: ${{ github.event.inputs.max_runtime || '45' }} minutes" >> $GITHUB_STEP_SUMMARY
         echo "- **Trigger**: ${{ github.event_name }}" >> $GITHUB_STEP_SUMMARY
         echo "- **Status**: ${{ job.status }}" >> $GITHUB_STEP_SUMMARY
@@ -222,6 +242,4 @@ jobs:
       if: always()
       run: |
         echo "Cleaning up to optimize storage usage..."
-        # This would require GitHub CLI or API calls to actually delete old artifacts
-        # For now, we rely on the reduced retention-days setting
         echo "Artifact retention set to 7 days to manage storage costs"
