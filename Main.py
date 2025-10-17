@@ -38,7 +38,7 @@ except ImportError:
 
 try:
     # Import notebook system
-    from magna_notebook import NotebookTradingSystem, NotebookTradingConfig
+    from magnaNotebook import NotebookTradingSystem, NotebookTradingConfig
     HAS_NOTEBOOK_SYSTEM = True
 except ImportError:
     HAS_NOTEBOOK_SYSTEM = False
@@ -89,10 +89,10 @@ class UnifiedTradingConfig:
             self.target_symbols = ["BTC/USD", "ETH/USD", "SOL/USD"]
         
         if self.api_key is None:
-            self.api_key = os.getenv('APCA_API_KEY_ID')
+            self.api_key = os.getenv('ALPACA_API_KEY')
         
         if self.secret_key is None:
-            self.secret_key = os.getenv('APCA_API_SECRET_KEY')
+            self.secret_key = os.getenv('ALPACA_SECRET_KEY')
 
 
 class UnifiedTradingSystem:
@@ -672,7 +672,8 @@ def main():
     print("Use ONLY for educational purposes and paper trading.")
     print("="*60)
     
-    user_confirm = input("\nDo you understand these risks and want to continue? (yes/no): ")
+    #user_confirm = input("\nDo you understand these risks and want to continue? (yes/no): ")
+    user_confirm = 'yes' 
     if user_confirm.lower() != 'yes':
         print("Operation cancelled.")
         return
