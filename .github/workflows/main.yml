@@ -73,8 +73,8 @@ jobs:
     
     - name: Set environment variables
       env:
-        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY }}
-        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY }}
+        ALPACA_API_KEY: ${{ secrets.ALPACA_API_KEY2 }}
+        ALPACA_SECRET_KEY: ${{ secrets.ALPACA_SECRET_KEY2 }}
         ALPACA_BASE_URL: ${{ secrets.ALPACA_BASE_URL }}
       run: |
         echo "ALPACA_API_KEY=$ALPACA_API_KEY" >> $GITHUB_ENV
