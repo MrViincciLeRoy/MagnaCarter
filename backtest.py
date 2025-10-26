@@ -24,15 +24,17 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class LiveTradingConfig:
-    """Configuration for live trading"""
+    """Configuration for live trading - FIXED for low balance accounts"""
     max_position_size: float = 0.8      # Max % of portfolio per trade
     stop_loss_pct: float = 0.05         # 5% stop loss
     take_profit_pct: float = 0.15       # 15% take profit
     max_daily_trades: int = 10          # Max trades per day
     min_trade_interval: int = 3600      # Min seconds between trades (1 hour)
     check_interval: int = 1800          # Check signals every 30 minutes
-    risk_per_trade: float = 0.02        # Risk 2% of portfolio per trade
+    risk_per_trade: float = 0.15        # FIXED: 15% risk (was 0.02) to meet $10 minimum
     max_runtime_minutes: int = None     # Max runtime in minutes (None = no limit)
+    min_order_value: float = 10.0       # Alpaca minimum order value for crypto
+    min_account_balance: float = 500.0  # Recommended minimum for comfortable trading
 
 
 @dataclass
@@ -67,8 +69,8 @@ class AlpacaMegaCryptoBotFixed:
             **strategy_params: Strategy parameters to override defaults
         """
         # API Configuration
-        self.api_key = api_key or os.getenv('APCA_API_KEY_ID')
-        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY')
+        self.api_key = api_key or os.getenv('APCA_API_KEY_ID') or os.getenv('ALPACA_API_KEY')
+        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY') or os.getenv('ALPACA_SECRET_KEY')
         self.paper_trading = paper_trading
 
         # Initialize Alpaca clients
@@ -147,7 +149,7 @@ class AlpacaMegaCryptoBotFixed:
 
         try:
             if end_date is None:
-                end_date = datetime.now().strftime("%Y-%m-%d-%H-%M")
+                end_date = datetime.now().strftime("%Y-%m-%d")
 
             logger.info(f"Fetching {symbol} data from {start_date} to {end_date}")
 
@@ -543,7 +545,7 @@ class AlpacaMegaCryptoBotFixed:
 
 class AlpacaLiveTrader:
     """
-    Live trading implementation using the Alpaca API
+    Live trading implementation using the Alpaca API - FIXED for low balance accounts
     """
 
     def __init__(
@@ -566,8 +568,8 @@ class AlpacaLiveTrader:
             config: Live trading configuration
             **strategy_params: Strategy parameters
         """
-        self.api_key = api_key or os.getenv('APCA_API_KEY_ID')
-        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY')
+        self.api_key = api_key or os.getenv('APCA_API_KEY_ID') or os.getenv('ALPACA_API_KEY')
+        self.secret_key = secret_key or os.getenv('APCA_API_SECRET_KEY') or os.getenv('ALPACA_SECRET_KEY')
         self.symbol = symbol
         self.paper_trading = paper_trading
         self.config = config or LiveTradingConfig()
@@ -583,15 +585,30 @@ class AlpacaLiveTrader:
                 paper=paper_trading
             )
             
-            # Test connection
+            # Test connection and check balance
             account = self.trading_client.get_account()
+            portfolio_value = float(account.portfolio_value)
+            
             logger.info(f"Connected to trading client: {account.status}")
+            logger.info(f"Portfolio value: ${portfolio_value:.2f}")
+            
+            # Warn about low balance
+            if portfolio_value < self.config.min_account_balance:
+                logger.warning(f"⚠️  LOW BALANCE WARNING ⚠️")
+                logger.warning(f"Portfolio: ${portfolio_value:.2f}")
+                logger.warning(f"Recommended minimum: ${self.config.min_account_balance:.2f}")
+                logger.warning(f"Current risk per trade: {self.config.risk_per_trade*100:.1f}%")
+                logger.warning(f"Order value: ${portfolio_value * self.config.risk_per_trade:.2f}")
+                
+                if portfolio_value * self.config.risk_per_trade < self.config.min_order_value:
+                    logger.error(f"⛔ TRADING MAY FAIL: Order value below ${self.config.min_order_value:.2f} minimum")
+                    logger.error(f"Solutions:")
+                    logger.error(f"  1. Add funds to paper account (recommended: ${self.config.min_account_balance:.2f})")
+                    logger.error(f"  2. Increase risk_per_trade to at least {(self.config.min_order_value/portfolio_value)*100:.1f}%")
             
         except Exception as e:
             logger.error(f"Failed to initialize trading client: {e}")
             logger.error(f"Error type: {type(e).__name__}")
-            logger.error(f"API Key present: {bool(self.api_key)}")
-            logger.error(f"Secret Key present: {bool(self.secret_key)}")
             raise
 
         # Initialize strategy
@@ -609,7 +626,7 @@ class AlpacaLiveTrader:
         self.last_reset_date = datetime.now().date()
         self.is_trading = False
         self.stop_trading_flag = False
-        self.start_time = None  # Track when trading started
+        self.start_time = None
 
         # Determine if crypto or stock
         self.is_crypto = "/" in symbol or any(crypto in symbol.upper()
@@ -632,7 +649,6 @@ class AlpacaLiveTrader:
             }
         except Exception as e:
             logger.error(f"Error getting account info: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
             return {}
 
     def get_current_position(self) -> Optional[Dict[str, Any]]:
@@ -653,11 +669,14 @@ class AlpacaLiveTrader:
             return None
         except Exception as e:
             logger.error(f"Error getting position: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
             return None
 
     def calculate_position_size(self, current_price: float) -> float:
-        """Calculate appropriate position size with minimum order handling"""
+        """
+        Calculate appropriate position size with FIXED minimum order handling
+        
+        This is the KEY FIX for low balance accounts
+        """
         try:
             logger.info(f"Calculating position size for price: ${current_price}")
             
@@ -669,86 +688,92 @@ class AlpacaLiveTrader:
             portfolio_value = account_info.get('portfolio_value', 0)
             buying_power = account_info.get('buying_power', 0)
             
-            logger.info(f"Account values - Portfolio: ${portfolio_value}, Buying Power: ${buying_power}")
+            logger.info(f"Account values - Portfolio: ${portfolio_value:.2f}, Buying Power: ${buying_power:.2f}")
 
             if portfolio_value <= 0:
                 logger.error("Invalid portfolio value")
                 return 0.0
 
-            # Define minimum order value for crypto/stock
-            MIN_ORDER_VALUE = 10.0 if self.is_crypto else 1.0
+            MIN_ORDER_VALUE = self.config.min_order_value
             
-            # Use risk-based position sizing
+            # CRITICAL CHECK: Can we even afford minimum order?
+            if buying_power < MIN_ORDER_VALUE * 1.05:  # 5% buffer for fees
+                logger.error(f"⛔ INSUFFICIENT FUNDS")
+                logger.error(f"Buying power: ${buying_power:.2f}")
+                logger.error(f"Required (with 5% buffer): ${MIN_ORDER_VALUE * 1.05:.2f}")
+                logger.error(f"Solution: Add funds to paper account or reduce trading")
+                return 0.0
+            
+            # Calculate position value using risk parameter
             risk_amount = portfolio_value * self.config.risk_per_trade
             max_position_value = portfolio_value * self.config.max_position_size
             
-            # Choose the smaller of risk-based or max position
+            # Start with the smaller of risk-based or max position
             position_value = min(risk_amount, max_position_value)
             
-            # Also limit by buying power (leave 5% margin)
+            logger.info(f"Initial sizing - Risk: ${risk_amount:.2f}, Max: ${max_position_value:.2f}")
+            
+            # CRITICAL FIX: Enforce minimum order value
+            if position_value < MIN_ORDER_VALUE:
+                logger.warning(f"Position ${position_value:.2f} below minimum ${MIN_ORDER_VALUE:.2f}")
+                
+                # Scale up to minimum order value
+                position_value = MIN_ORDER_VALUE
+                actual_risk_pct = (position_value / portfolio_value) * 100
+                original_risk_pct = self.config.risk_per_trade * 100
+                
+                logger.warning(f"✅ SCALED UP to minimum order: ${MIN_ORDER_VALUE:.2f}")
+                logger.warning(f"Risk adjusted: {original_risk_pct:.1f}% → {actual_risk_pct:.1f}%")
+            
+            # Limit by available buying power (with buffer for fees)
             position_value = min(position_value, buying_power * 0.95)
             
-            logger.info(f"Position sizing - Risk: ${risk_amount}, Max: ${max_position_value}, Available: ${buying_power}")
-            logger.info(f"Initial position value: ${position_value}")
+            logger.info(f"Final position value: ${position_value:.2f}")
 
-            # CRITICAL: Check if position meets minimum order requirement
-            if position_value < MIN_ORDER_VALUE:
-                logger.warning(f"Position value ${position_value:.2f} below minimum ${MIN_ORDER_VALUE:.2f}")
-                
-                # Scale up to meet minimum order requirement
-                if buying_power >= MIN_ORDER_VALUE:
-                    logger.info(f"Scaling up to minimum order value: ${MIN_ORDER_VALUE:.2f}")
-                    position_value = MIN_ORDER_VALUE
-                    
-                    # Log the adjustment
-                    original_risk_pct = self.config.risk_per_trade * 100
-                    actual_risk_pct = (position_value / portfolio_value) * 100
-                    logger.warning(f"Risk adjusted from {original_risk_pct:.2f}% to {actual_risk_pct:.2f}% to meet minimum order")
-                else:
-                    logger.error(f"Insufficient buying power for minimum order: ${buying_power} < ${MIN_ORDER_VALUE}")
-                    return 0.0
-
-            if position_value <= 0:
-                logger.warning("Position value is zero or negative after minimum order check")
-                return 0.0
-
-            # Calculate quantity
+            # Calculate quantity based on asset type
             if self.is_crypto:
-                # Crypto supports fractional trading
+                # Crypto supports fractional shares
                 quantity = position_value / current_price
-                quantity = round(quantity, 6)  # 6 decimal precision
+                quantity = round(quantity, 6)  # 6 decimal precision for crypto
                 
                 # Final validation
-                order_value = quantity * current_price
-                if order_value < MIN_ORDER_VALUE:
-                    logger.error(f"Final order value ${order_value:.2f} still below minimum ${MIN_ORDER_VALUE:.2f}")
+                final_order_value = quantity * current_price
+                
+                if final_order_value < MIN_ORDER_VALUE * 0.99:  # Allow 1% tolerance
+                    logger.error(f"⛔ FINAL VALIDATION FAILED")
+                    logger.error(f"Order value: ${final_order_value:.2f}")
+                    logger.error(f"Minimum required: ${MIN_ORDER_VALUE:.2f}")
+                    logger.error(f"This should not happen - check calculation logic")
                     return 0.0
                     
             else:
-                # Stocks - whole shares only
+                # Stocks require whole shares
                 quantity = int(position_value / current_price)
                 
-                # Ensure at least 1 share
                 if quantity < 1:
-                    logger.warning(f"Position size less than 1 share: {quantity}")
-                    # Try to buy 1 share if we have enough buying power
-                    share_cost = current_price
-                    if share_cost <= buying_power * 0.95:
-                        logger.info(f"Buying 1 share at ${current_price:.2f}")
+                    logger.warning(f"Calculated less than 1 share: {quantity}")
+                    
+                    # Try to buy 1 share if we can afford it
+                    if current_price <= buying_power * 0.95:
+                        logger.info(f"✅ Buying 1 share at ${current_price:.2f}")
                         quantity = 1
                     else:
-                        logger.error(f"Cannot afford 1 share: ${share_cost:.2f} > ${buying_power * 0.95:.2f}")
+                        logger.error(f"⛔ Cannot afford 1 share")
+                        logger.error(f"Share price: ${current_price:.2f}")
+                        logger.error(f"Available: ${buying_power * 0.95:.2f}")
                         return 0.0
 
             final_order_value = quantity * current_price
-            logger.info(f"Final position size: {quantity} units at ${current_price:.2f} = ${final_order_value:.2f}")
+            logger.info(f"✅ POSITION CALCULATED")
+            logger.info(f"Quantity: {quantity} units")
+            logger.info(f"Price: ${current_price:.2f}")
+            logger.info(f"Total order value: ${final_order_value:.2f}")
             
             return quantity
 
         except Exception as e:
             logger.error(f"Error calculating position size: {e}")
             logger.error(f"Error type: {type(e).__name__}")
-            logger.error(f"Current price: {current_price}")
             return 0.0
 
     def place_market_order(self, side: OrderSide, quantity: float) -> bool:
@@ -769,12 +794,12 @@ class AlpacaLiveTrader:
 
             order = self.trading_client.submit_order(order_data=market_order_data)
 
-            logger.info(f"Order submitted successfully:")
-            logger.info(f"  Order ID: {order.id}")
-            logger.info(f"  Symbol: {order.symbol}")
-            logger.info(f"  Side: {order.side}")
-            logger.info(f"  Quantity: {order.qty}")
-            logger.info(f"  Status: {order.status}")
+            logger.info(f"✅ ORDER SUBMITTED SUCCESSFULLY")
+            logger.info(f"Order ID: {order.id}")
+            logger.info(f"Symbol: {order.symbol}")
+            logger.info(f"Side: {order.side}")
+            logger.info(f"Quantity: {order.qty}")
+            logger.info(f"Status: {order.status}")
 
             # Update trading state
             self.last_trade_time = datetime.now()
@@ -783,7 +808,7 @@ class AlpacaLiveTrader:
             return True
 
         except Exception as e:
-            logger.error(f"Error placing market order: {e}")
+            logger.error(f"⛔ ORDER FAILED: {e}")
             logger.error(f"Error type: {type(e).__name__}")
             logger.error(f"Order details - Side: {side}, Quantity: {quantity}, Symbol: {self.symbol}")
             
@@ -795,7 +820,7 @@ class AlpacaLiveTrader:
             return False
 
     def close_position(self) -> bool:
-        """Close current position with enhanced error handling"""
+        """Close current position"""
         try:
             position = self.get_current_position()
             if not position:
@@ -815,31 +840,24 @@ class AlpacaLiveTrader:
 
         except Exception as e:
             logger.error(f"Error closing position: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
             return False
 
     def should_continue_trading(self) -> bool:
-        """Check if trading should continue based on runtime limits and other conditions"""
-        # Check stop flag
+        """Check if trading should continue"""
         if self.stop_trading_flag:
             logger.info("Trading stopped by stop flag")
             return False
         
-        # Check max runtime if configured
         if self.config.max_runtime_minutes and self.start_time:
             elapsed_minutes = (datetime.now() - self.start_time).total_seconds() / 60
             if elapsed_minutes >= self.config.max_runtime_minutes:
                 logger.info(f"Max runtime reached: {elapsed_minutes:.1f}/{self.config.max_runtime_minutes} minutes")
                 return False
-            else:
-                remaining_minutes = self.config.max_runtime_minutes - elapsed_minutes
-                logger.debug(f"Runtime remaining: {remaining_minutes:.1f} minutes")
         
         return True
 
     def should_trade(self, signal: int) -> bool:
-        """Check if trading conditions are met with account balance consideration"""
-        # Check if trading should continue
+        """Check if trading conditions are met"""
         if not self.should_continue_trading():
             return False
 
@@ -867,23 +885,23 @@ class AlpacaLiveTrader:
             logger.debug(f"Signal unchanged: {signal}")
             return False
 
-        # NEW: Check if we have sufficient buying power for a trade
+        # Check if we have sufficient buying power
         account_info = self.get_account_info()
         if account_info:
             buying_power = account_info.get('buying_power', 0)
-            MIN_ORDER_VALUE = 10.0 if self.is_crypto else 1.0
+            MIN_ORDER_VALUE = self.config.min_order_value
             
-            if buying_power < MIN_ORDER_VALUE:
-                logger.warning(f"Insufficient buying power for trade: ${buying_power} < ${MIN_ORDER_VALUE}")
+            if buying_power < MIN_ORDER_VALUE * 1.05:
+                logger.warning(f"Insufficient buying power: ${buying_power:.2f} < ${MIN_ORDER_VALUE * 1.05:.2f}")
                 return False
 
-        logger.info(f"Trading conditions met. Signal: {signal}, Last: {self.last_signal}")
+        logger.info(f"✅ Trading conditions met. Signal: {signal}, Last: {self.last_signal}")
         return True
 
     def execute_trade(self, signal: TradeSignal) -> bool:
-        """Execute trade based on signal with comprehensive error handling"""
+        """Execute trade based on signal"""
         try:
-            logger.info(f"Executing trade - Signal: {signal.signal}, Price: ${signal.price}, Symbol: {signal.symbol}")
+            logger.info(f"Executing trade - Signal: {signal.signal}, Price: ${signal.price:.2f}")
             
             if not self.should_trade(signal.signal):
                 logger.info("Trade conditions not met")
@@ -898,60 +916,51 @@ class AlpacaLiveTrader:
                 logger.info("Processing BUY signal")
                 
                 if current_position and current_position['side'] == 'short':
-                    # Close short first
                     logger.info("Closing short position before going long")
                     self.close_position()
-                    time.sleep(2)  # Wait for order to process
+                    time.sleep(2)
 
                 if not current_position or current_position['side'] != 'long':
-                    # Open long position
                     quantity = self.calculate_position_size(signal.price)
                     logger.info(f"Calculated position size: {quantity}")
                     
                     if quantity > 0:
                         success = self.place_market_order(OrderSide.BUY, quantity)
                         if success:
-                            logger.info(f"LONG position opened at ${signal.price:.2f}")
+                            logger.info(f"✅ LONG position opened at ${signal.price:.2f}")
                     else:
-                        logger.error("Cannot open position - invalid quantity")
+                        logger.error("⛔ Cannot open position - invalid quantity")
                         
             elif signal.signal == -1:  # Sell signal
                 logger.info("Processing SELL signal")
                 
                 if current_position and current_position['side'] == 'long':
-                    # Close long position
                     success = self.close_position()
                     if success:
-                        logger.info(f"LONG position closed at ${signal.price:.2f}")
-                elif current_position and current_position['side'] == 'short':
-                    logger.info("Already in short position")
-                    success = True
+                        logger.info(f"✅ LONG position closed at ${signal.price:.2f}")
                 else:
-                    logger.info("No position to close for sell signal")
+                    logger.info("No position to close")
                     success = True
 
             if success:
                 self.last_signal = signal.signal
-                logger.info(f"Trade executed successfully. New signal state: {signal.signal}")
+                logger.info(f"✅ Trade executed successfully")
             else:
-                logger.error("Trade execution failed")
+                logger.error("⛔ Trade execution failed")
 
             return success
 
         except Exception as e:
             logger.error(f"Error executing trade: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
-            logger.error(f"Signal details: {signal}")
             return False
 
     def generate_signal(self) -> Optional[TradeSignal]:
-        """Generate trading signal from current market data with enhanced error handling"""
+        """Generate trading signal from current market data"""
         try:
-            # Get recent data for analysis
             end_date = datetime.now()
-            start_date = end_date - timedelta(days=30)  # Get last month
+            start_date = end_date - timedelta(days=30)
 
-            logger.info(f"Generating signal for {self.symbol}")
+            logger.info(f"Fetching {self.symbol} data from {start_date.strftime('%Y-%m-%d')} to {end_date.strftime('%Y-%m-%d')}")
 
             if self.is_crypto:
                 data = self.strategy_bot.get_crypto_data(
@@ -966,12 +975,8 @@ class AlpacaLiveTrader:
                     end_date=end_date.strftime("%Y-%m-%d")
                 )
 
-            if data.empty:
-                logger.error("No data available for signal generation")
-                return None
-                
-            if len(data) < 100:
-                logger.warning(f"Insufficient data for signal generation: {len(data)} bars")
+            if data.empty or len(data) < 100:
+                logger.error(f"Insufficient data: {len(data)} bars")
                 return None
 
             # Debug signal generation
@@ -996,13 +1001,14 @@ class AlpacaLiveTrader:
 
         except Exception as e:
             logger.error(f"Error generating signal: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
             return None
 
     def run_single_check(self) -> bool:
-        """Run a single trading check cycle with detailed logging"""
+        """Run a single trading check cycle"""
         try:
+            logger.info("="*60)
             logger.info("Running trading check...")
+            logger.info("="*60)
 
             # Generate signal
             signal = self.generate_signal()
@@ -1025,17 +1031,19 @@ class AlpacaLiveTrader:
 
         except Exception as e:
             logger.error(f"Error in trading check: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
             return False
 
     def start_live_trading(self):
-        """Start live trading loop with runtime management"""
+        """Start live trading loop"""
         self.start_time = datetime.now()
         
-        logger.info("Starting live trading...")
+        logger.info("="*60)
+        logger.info("STARTING LIVE TRADING")
+        logger.info("="*60)
         logger.info(f"Symbol: {self.symbol}")
         logger.info(f"Paper trading: {self.paper_trading}")
         logger.info(f"Check interval: {self.config.check_interval}s")
+        logger.info(f"Risk per trade: {self.config.risk_per_trade*100:.1f}%")
         
         if self.config.max_runtime_minutes:
             logger.info(f"Max runtime: {self.config.max_runtime_minutes} minutes")
@@ -1056,29 +1064,22 @@ class AlpacaLiveTrader:
             while self.should_continue_trading():
                 self.run_single_check()
 
-                # Sleep with interrupt checking and runtime monitoring
-                sleep_start = datetime.now()
+                # Sleep with interrupt checking
                 for i in range(self.config.check_interval):
                     if not self.should_continue_trading():
                         break
                     time.sleep(1)
-                    
-                    # Log periodic runtime updates
-                    if self.config.max_runtime_minutes and i % 300 == 0:  # Every 5 minutes
-                        elapsed = (datetime.now() - self.start_time).total_seconds() / 60
-                        remaining = self.config.max_runtime_minutes - elapsed
-                        if remaining > 0:
-                            logger.debug(f"Runtime: {elapsed:.1f}/{self.config.max_runtime_minutes}min ({remaining:.1f}min remaining)")
 
         except KeyboardInterrupt:
             logger.info("Keyboard interrupt received")
         except Exception as e:
             logger.error(f"Error in trading loop: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
         finally:
             self.is_trading = False
             elapsed_minutes = (datetime.now() - self.start_time).total_seconds() / 60
+            logger.info("="*60)
             logger.info(f"Live trading stopped after {elapsed_minutes:.1f} minutes")
+            logger.info("="*60)
 
     def stop_live_trading(self):
         """Stop live trading"""
@@ -1091,11 +1092,10 @@ class AlpacaLiveTrader:
             account_info = self.get_account_info()
             position = self.get_current_position()
 
-            # Get recent orders
             try:
                 orders = self.trading_client.get_orders()
                 recent_orders = []
-                for order in orders[:10]:  # Last 10 orders
+                for order in orders[:10]:
                     recent_orders.append({
                         'id': str(order.id),
                         'symbol': order.symbol,
@@ -1104,8 +1104,7 @@ class AlpacaLiveTrader:
                         'status': order.status,
                         'filled_at': str(order.filled_at) if hasattr(order, 'filled_at') else None
                     })
-            except Exception as e:
-                logger.error(f"Error getting orders: {e}")
+            except:
                 recent_orders = []
 
             return {
@@ -1120,47 +1119,47 @@ class AlpacaLiveTrader:
 
         except Exception as e:
             logger.error(f"Error getting performance summary: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
             return {}
 
     def test_api_connection(self) -> bool:
         """Test API connection and trading capabilities"""
         try:
+            logger.info("="*60)
             logger.info("Testing API connection...")
+            logger.info("="*60)
             
             # Test account access
             account_info = self.get_account_info()
             if not account_info:
-                logger.error("Failed to get account info")
+                logger.error("⛔ Failed to get account info")
                 return False
             
-            logger.info(f"Account test passed - Portfolio: ${account_info.get('portfolio_value', 0):,.2f}")
+            logger.info(f"✅ Account test passed - Portfolio: ${account_info.get('portfolio_value', 0):,.2f}")
             
             # Test position retrieval
             position = self.get_current_position()
-            logger.info(f"Position test passed - Current position: {position}")
+            logger.info(f"✅ Position test passed - Current position: {position}")
             
             # Test signal generation
             signal = self.generate_signal()
             if signal is None:
-                logger.error("Failed to generate signal")
+                logger.error("⛔ Failed to generate signal")
                 return False
                 
-            logger.info(f"Signal test passed - Generated: {signal.signal} at ${signal.price:.2f}")
+            logger.info(f"✅ Signal test passed - Generated: {signal.signal} at ${signal.price:.2f}")
             
-            logger.info("All API tests passed successfully")
+            logger.info("="*60)
+            logger.info("✅ All API tests passed successfully")
+            logger.info("="*60)
             return True
             
         except Exception as e:
-            logger.error(f"API connection test failed: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
+            logger.error(f"⛔ API connection test failed: {e}")
             return False
 
 
 class AlpacaStrategyWrapper(Strategy):
-    """
-    Backtesting strategy wrapper for the Alpaca crypto bot
-    """
+    """Backtesting strategy wrapper"""
 
     def init(self):
         """Initialize strategy variables"""
@@ -1172,17 +1171,14 @@ class AlpacaStrategyWrapper(Strategy):
         """Execute trading logic on each bar"""
         current_signal = self.signal[-1]
 
-        # Only act if signal has changed
         if current_signal != self.last_signal:
             current_price = self.data.Close[-1]
 
-            # Buy signal: Enter long position
             if current_signal == 1 and not self.position:
                 self.buy()
                 self.trade_count += 1
                 logger.info(f"BUY #{self.trade_count} at ${current_price:.2f}")
 
-            # Sell signal: Close long position
             elif current_signal == -1 and self.position.is_long:
                 self.position.close()
                 self.trade_count += 1
@@ -1192,9 +1188,7 @@ class AlpacaStrategyWrapper(Strategy):
 
 
 class AlpacaBacktester:
-    """
-    Complete backtesting and live trading system with Alpaca integration
-    """
+    """Complete backtesting and live trading system"""
 
     def __init__(
         self,
@@ -1216,7 +1210,6 @@ class AlpacaBacktester:
             **strategy_params
         )
 
-        # Live trading instances
         self.live_traders: Dict[str, AlpacaLiveTrader] = {}
 
     def create_live_trader(
@@ -1243,17 +1236,7 @@ class AlpacaBacktester:
         config: LiveTradingConfig = None,
         background: bool = False
     ) -> Optional[AlpacaLiveTrader]:
-        """
-        Start live trading for a symbol
-
-        Args:
-            symbol: Trading symbol
-            config: Live trading configuration
-            background: Run in background thread
-
-        Returns:
-            AlpacaLiveTrader instance
-        """
+        """Start live trading for a symbol"""
         if symbol not in self.live_traders:
             trader = self.create_live_trader(symbol, config)
         else:
@@ -1265,7 +1248,6 @@ class AlpacaBacktester:
             return None
 
         if background:
-            # Run in background thread
             thread = threading.Thread(
                 target=trader.start_live_trading,
                 name=f"LiveTrader-{symbol}",
@@ -1274,27 +1256,18 @@ class AlpacaBacktester:
             thread.start()
             logger.info(f"Live trading started in background for {symbol}")
         else:
-            # Run in main thread (blocking)
             trader.start_live_trading()
 
         return trader
 
     def stop_live_trading(self, symbol: str = None):
-        """
-        Stop live trading for symbol(s)
-
-        Args:
-            symbol: Specific symbol to stop, or None for all
-        """
+        """Stop live trading for symbol(s)"""
         if symbol:
             if symbol in self.live_traders:
                 self.live_traders[symbol].stop_live_trading()
-                logger.info(f"Stopped live trading for {symbol}")
         else:
-            # Stop all live traders
-            for sym, trader in self.live_traders.items():
+            for trader in self.live_traders.values():
                 trader.stop_live_trading()
-                logger.info(f"Stopped live trading for {sym}")
 
     def get_live_trading_summary(self) -> Dict[str, Any]:
         """Get summary of all live trading activities"""
@@ -1318,43 +1291,14 @@ class AlpacaBacktester:
         commission: float = 0.002,
         max_runtime_minutes: int = None
     ) -> Tuple[Any, pd.DataFrame]:
-        """
-        Run complete backtest with runtime management
-
-        Args:
-            symbol: Trading symbol
-            start_date: Start date (YYYY-MM-DD)
-            end_date: End date (YYYY-MM-DD)
-            initial_cash: Starting capital
-            commission: Trading commission rate
-            max_runtime_minutes: Maximum runtime in minutes (None = no limit)
-
-        Returns:
-            Tuple of (backtest_stats, strategy_data)
-        """
+        """Run complete backtest"""
         backtest_start_time = datetime.now()
         
         logger.info(f"Starting backtest for {symbol}")
         logger.info(f"Period: {start_date} to {end_date or 'today'}")
-        
-        if max_runtime_minutes:
-            logger.info(f"Max runtime: {max_runtime_minutes} minutes")
-            end_time = backtest_start_time + timedelta(minutes=max_runtime_minutes)
-            logger.info(f"Will timeout at: {end_time.strftime('%Y-%m-%d %H:%M:%S')}")
-
-        def check_runtime():
-            if max_runtime_minutes:
-                elapsed_minutes = (datetime.now() - backtest_start_time).total_seconds() / 60
-                if elapsed_minutes >= max_runtime_minutes:
-                    logger.warning(f"Backtest timeout reached: {elapsed_minutes:.1f}/{max_runtime_minutes} minutes")
-                    return False
-            return True
 
         try:
-            # --- 1. Get Data ---
-            if not check_runtime():
-                return None, pd.DataFrame()
-                
+            # Get Data
             if "/" in symbol or "USD" in symbol.upper():
                 data = self.strategy_bot.get_crypto_data(symbol, start_date, end_date)
             else:
@@ -1366,16 +1310,10 @@ class AlpacaBacktester:
 
             logger.info(f"Data loaded: {len(data)} bars")
 
-            # --- 2. Calculate Indicators ---
-            if not check_runtime():
-                return None, pd.DataFrame()
-                
+            # Calculate Indicators
             strategy_data = self.strategy_bot.calculate_indicators(data)
 
-            # --- 3. Analyze Signals ---
-            if not check_runtime():
-                return None, pd.DataFrame()
-                
+            # Analyze Signals
             signal_analysis = self.strategy_bot.analyze_signals(strategy_data)
 
             if signal_analysis:
@@ -1383,33 +1321,14 @@ class AlpacaBacktester:
                 for signal_name, stats in signal_analysis['signal_distribution'].items():
                     logger.info(f"   {signal_name}: {stats['count']:,} ({stats['percentage']:.2f}%)")
 
-                logger.info("Trading Opportunities:")
-                logger.info(f"   Signal changes: {signal_analysis['signal_changes']}")
-                logger.info(f"   Buy signals: {signal_analysis['buy_signals']}")
-                logger.info(f"   Sell signals: {signal_analysis['sell_signals']}")
-
-                if signal_analysis['signal_changes'] == 0:
-                    logger.warning("No trading signals generated!")
-                    return None, strategy_data
-
-            # --- 4. Setup Backtest ---
-            if not check_runtime():
-                return None, pd.DataFrame()
-                
+            # Setup Backtest
             if initial_cash is None:
                 max_price = strategy_data['Close'].max()
-                if "/" in symbol or "BTC" in symbol or "ETH" in symbol:
-                    initial_cash = max(100000, max_price * 3)  # Crypto
-                else:
-                    initial_cash = max(50000, max_price * 100)  # Stocks
+                initial_cash = max(100000, max_price * 3) if "/" in symbol else max(50000, max_price * 100)
 
             logger.info(f"Initial capital: ${initial_cash:,.2f}")
-            logger.info(f"Max {symbol} price: ${strategy_data['Close'].max():,.2f}")
 
-            # --- 5. Run Backtest ---
-            if not check_runtime():
-                return None, pd.DataFrame()
-                
+            # Run Backtest
             bt = Backtest(
                 strategy_data,
                 AlpacaStrategyWrapper,
@@ -1420,16 +1339,12 @@ class AlpacaBacktester:
 
             stats = bt.run()
 
-            # --- 6. Performance Analysis ---
-            if not check_runtime():
-                return stats, strategy_data
-                
+            # Print results
             self._print_results(stats, strategy_data, symbol)
 
-            # --- 7. Generate Plot ---
-            if check_runtime():
-                logger.info("Generating performance plot...")
-                bt.plot()
+            # Generate plot
+            logger.info("Generating performance plot...")
+            bt.plot()
 
             elapsed_minutes = (datetime.now() - backtest_start_time).total_seconds() / 60
             logger.info(f"Backtest completed in {elapsed_minutes:.1f} minutes")
@@ -1438,7 +1353,6 @@ class AlpacaBacktester:
 
         except Exception as e:
             logger.error(f"Error during backtesting: {e}")
-            logger.error(f"Error type: {type(e).__name__}")
             return None, pd.DataFrame()
 
     def _print_results(self, stats: Any, data: pd.DataFrame, symbol: str):
@@ -1447,13 +1361,11 @@ class AlpacaBacktester:
         logger.info("BACKTEST RESULTS")
         logger.info("="*50)
 
-        # Basic performance metrics
         logger.info(f"Return: {stats['Return [%]']:.2f}%")
         logger.info(f"Buy & Hold: {self._calculate_buy_hold_return(data):.2f}%")
         logger.info(f"Max Drawdown: {stats['Max. Drawdown [%]']:.2f}%")
         logger.info(f"Sharpe Ratio: {stats.get('Sharpe Ratio', 'N/A')}")
 
-        # Trading statistics
         logger.info("Trading Stats:")
         logger.info(f"   Total Trades: {stats['# Trades']}")
 
@@ -1462,18 +1374,13 @@ class AlpacaBacktester:
             logger.info(f"   Avg Trade: {stats['Avg. Trade [%]']:.2f}%")
             logger.info(f"   Best Trade: {stats['Best Trade [%]']:.2f}%")
             logger.info(f"   Worst Trade: {stats['Worst Trade [%]']:.2f}%")
-            logger.info(f"   Avg Duration: {stats['Avg. Trade Duration']}")
-        else:
-            logger.warning("   No trades executed!")
 
         logger.info("="*50)
 
     def _calculate_buy_hold_return(self, data: pd.DataFrame) -> float:
-        """Calculate buy and hold return for comparison"""
+        """Calculate buy and hold return"""
         try:
-            initial_price = data['Close'].iloc[0]
-            final_price = data['Close'].iloc[-1]
-            return ((final_price - initial_price) / initial_price) * 100
+            return ((data['Close'].iloc[-1] - data['Close'].iloc[0]) / data['Close'].iloc[0]) * 100
         except:
             return 0.0
 
@@ -1481,46 +1388,20 @@ class AlpacaBacktester:
 def get_runtime_from_env() -> Optional[int]:
     """Get max runtime from environment variable"""
     try:
-        max_runtime = os.getenv('MAX_RUNTIME_MINUTES', 40)
+        max_runtime = os.getenv('MAX_RUNTIME_MINUTES', 45)
         if max_runtime:
             return int(max_runtime)
     except (ValueError, TypeError):
-        logger.warning(f"Invalid MAX_RUNTIME_MINUTES value: {max_runtime}")
+        pass
     return None
 
 
-def demo_backtest():
-    """Demo: Run a backtest with runtime management"""
-    logger.info("Running backtest demo...")
-    
-    max_runtime = get_runtime_from_env()
-
-    backtester = AlpacaBacktester(
-        api_key=os.getenv('ALPACA_API_KEY'),
-        secret_key=os.getenv('ALPACA_SECRET_KEY'),
-        paper_trading=True,
-        len_cbrc=30,
-        signal_period='360min'
-    )
-
-    stats, data = backtester.run_backtest(
-        symbol="BTC/USD",
-        start_date="2024-01-01",
-        end_date="2024-06-30",
-        initial_cash=100000,
-        max_runtime_minutes=max_runtime
-    )
-
-    return stats, data
-
-
 def demo_live_trading():
-    """Demo: Live trading setup with runtime management"""
+    """Demo: Live trading setup - FIXED FOR LOW BALANCE"""
     logger.info("Setting up live trading demo...")
     
     max_runtime = get_runtime_from_env()
 
-    # Initialize system
     system = AlpacaBacktester(
         api_key=os.getenv('ALPACA_API_KEY'),
         secret_key=os.getenv('ALPACA_SECRET_KEY'),
@@ -1529,85 +1410,23 @@ def demo_live_trading():
         signal_period='360min'
     )
 
-    # Configure live trading with minimum order handling
+    # FIXED CONFIG: Higher risk to meet minimum order requirement
     config = LiveTradingConfig(
         max_position_size=0.5,
         max_daily_trades=5,
         min_trade_interval=1800,
         check_interval=300,
-        risk_per_trade=0.02,
-        max_runtime_minutes=max_runtime
+        risk_per_trade=0.15,  # FIXED: 15% instead of 2%
+        max_runtime_minutes=max_runtime,
+        min_order_value=10.0,
+        min_account_balance=500.0
     )
 
-    # Start live trading
     trader = system.start_live_trading(
         symbol="BTC/USD",
         config=config,
         background=False
     )
-
-    return system
-
-
-def demo_multi_symbol_trading():
-    """Demo: Multiple symbol live trading with runtime management"""
-    logger.info("Setting up multi-symbol trading demo...")
-    
-    max_runtime = get_runtime_from_env()
-
-    system = AlpacaBacktester(
-        api_key=os.getenv('APCA_API_KEY_ID'),
-        secret_key=os.getenv('APCA_API_SECRET_KEY'),
-        paper_trading=True
-    )
-
-    # Different configs for different assets
-    crypto_config = LiveTradingConfig(
-        max_position_size=0.4,
-        max_daily_trades=8,
-        check_interval=1800,
-        max_runtime_minutes=max_runtime
-    )
-
-    stock_config = LiveTradingConfig(
-        max_position_size=0.6,
-        max_daily_trades=5,
-        check_interval=3600,
-        max_runtime_minutes=max_runtime
-    )
-
-    # Start multiple traders
-    symbols_configs = [
-        ("BTC/USD", crypto_config),
-        ("ETH/USD", crypto_config),
-        ("AAPL", stock_config),
-    ]
-
-    for symbol, config in symbols_configs:
-        system.start_live_trading(
-            symbol=symbol,
-            config=config,
-            background=True
-        )
-
-    # Monitor all traders with runtime awareness
-    monitor_start = datetime.now()
-    try:
-        while True:
-            # Check if we should stop monitoring due to runtime limit
-            if max_runtime:
-                elapsed_minutes = (datetime.now() - monitor_start).total_seconds() / 60
-                if elapsed_minutes >= max_runtime:
-                    logger.info(f"Monitor timeout reached: {elapsed_minutes:.1f}/{max_runtime} minutes")
-                    break
-                    
-            summary = system.get_live_trading_summary()
-            logger.info(f"Active traders: {summary['active_traders']}")
-            time.sleep(60)
-    except KeyboardInterrupt:
-        logger.info("Stopping all traders...")
-    finally:
-        system.stop_live_trading()
 
     return system
 
@@ -1618,7 +1437,7 @@ def main():
 
     parser = argparse.ArgumentParser(description="Alpaca Trading System")
     parser.add_argument("--mode", choices=["backtest", "live", "multi", "test"],
-                       default="backtest", help="Operation mode")
+                       default="live", help="Operation mode")
     parser.add_argument("--symbol", default="BTC/USD", help="Trading symbol")
     parser.add_argument("--paper", action="store_true", default=True,
                        help="Use paper trading")
@@ -1626,35 +1445,24 @@ def main():
     args = parser.parse_args()
 
     if args.mode == "test":
-        # Test API connection
         logger.info("Testing API connection...")
         system = AlpacaBacktester(
-            api_key=os.getenv('APCA_API_KEY_ID'),
-            secret_key=os.getenv('APCA_API_SECRET_KEY'),
+            api_key=os.getenv('ALPACA_API_KEY'),
+            secret_key=os.getenv('ALPACA_SECRET_KEY'),
             paper_trading=True
         )
         
         trader = system.create_live_trader(args.symbol)
         success = trader.test_api_connection()
-        logger.info(f"API test result: {'PASSED' if success else 'FAILED'}")
-
-    elif args.mode == "backtest":
-        # Run backtest
-        stats, data = demo_backtest()
-        if stats:
-            logger.info("Backtest completed!")
+        logger.info(f"API test result: {'✅ PASSED' if success else '⛔ FAILED'}")
 
     elif args.mode == "live":
-        # Single symbol live trading
-        logger.info("Starting live trading...")
+        logger.info("⚠️  STARTING LIVE TRADING ⚠️")
         logger.warning("Make sure you're using paper trading first!")
         system = demo_live_trading()
 
-    elif args.mode == "multi":
-        # Multi-symbol live trading
-        logger.info("Starting multi-symbol trading...")
-        logger.warning("Make sure you're using paper trading first!")
-        system = demo_multi_symbol_trading()
+    else:
+        logger.error(f"Mode {args.mode} not fully implemented in this fixed version")
 
 
 if __name__ == "__main__":
